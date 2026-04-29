@@ -505,7 +505,11 @@ export const zalouserPlugin: ChannelPlugin<ResolvedZalouserAccount> = {
           continue;
         }
         if (/^\d+$/.test(trimmed)) {
-          results.push({ input, resolved: true, id: trimmed });
+          results.push({
+            input,
+            resolved: true,
+            id: kind === "group" ? `group:${trimmed}` : trimmed,
+          });
           continue;
         }
         try {
@@ -531,7 +535,7 @@ export const zalouserPlugin: ChannelPlugin<ResolvedZalouserAccount> = {
             results.push({
               input,
               resolved: Boolean(best?.groupId),
-              id: best?.groupId,
+              id: best?.groupId ? `group:${best.groupId}` : undefined,
               name: best?.name,
               note: groups.length > 1 ? "multiple matches; chose first" : undefined,
             });
