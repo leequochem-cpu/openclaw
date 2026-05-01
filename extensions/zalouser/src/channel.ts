@@ -21,10 +21,13 @@ import {
   DEFAULT_ACCOUNT_ID,
   chunkTextForOutbound,
   deleteAccountFromConfigSection,
+  evaluateGroupRouteAccessForPolicy,
   formatAllowFromLowercase,
   isNumericTargetId,
   migrateBaseNameToDefaultAccount,
   normalizeAccountId,
+  resolveDefaultGroupPolicy,
+  resolveOpenProviderRuntimeGroupPolicy,
   sendPayloadWithChunkedTextAndMedia,
   setAccountEnabledInConfigSection,
 } from "openclaw/plugin-sdk/zalouser";
@@ -37,7 +40,11 @@ import {
   type ResolvedZalouserAccount,
 } from "./accounts.js";
 import { ZalouserConfigSchema } from "./config-schema.js";
-import { buildZalouserGroupCandidates, findZalouserGroupEntry } from "./group-policy.js";
+import {
+  buildZalouserGroupCandidates,
+  findZalouserGroupEntry,
+  isZalouserGroupEntryAllowed,
+} from "./group-policy.js";
 import { resolveZalouserReactionMessageIds } from "./message-sid.js";
 import { zalouserOnboardingAdapter } from "./onboarding.js";
 import { probeZalouser } from "./probe.js";
@@ -165,6 +172,46 @@ function resolveZalouserQrProfile(accountId?: string | null): string {
   return normalized;
 }
 
+function assertZalouserOutboundGroupAllowed(params: {
+  account: ResolvedZalouserAccount;
+  cfg: OpenClawConfig;
+  groupId: string;
+}): void {
+  const { groupPolicy } = resolveOpenProviderRuntimeGroupPolicy({
+    providerConfigPresent: params.cfg.channels?.zalouser !== undefined,
+    groupPolicy: params.account.config.groupPolicy,
+    defaultGroupPolicy: resolveDefaultGroupPolicy(params.cfg),
+  });
+  const groups = params.account.config.groups ?? {};
+  const groupEntry = findZalouserGroupEntry(
+    groups,
+    buildZalouserGroupCandidates({
+      groupId: params.groupId,
+      includeGroupIdAlias: true,
+      includeWildcard: true,
+    }),
+  );
+  const routeAccess = evaluateGroupRouteAccessForPolicy({
+    groupPolicy,
+    routeAllowlistConfigured: Object.keys(groups).length > 0,
+    routeMatched: Boolean(groupEntry),
+    routeEnabled: isZalouserGroupEntryAllowed(groupEntry),
+  });
+  if (routeAccess.allowed) {
+    return;
+  }
+
+  const suffix =
+    routeAccess.reason === "disabled"
+      ? "groupPolicy=disabled"
+      : routeAccess.reason === "empty_allowlist"
+        ? "groupPolicy=allowlist with no groups configured"
+        : routeAccess.reason === "route_disabled"
+          ? "group is disabled"
+          : "group is not allowlisted";
+  throw new Error(`Zalouser group ${params.groupId} is blocked by group access policy (${suffix})`);
+}
+
 function mapUser(params: {
   id: string;
   name?: string | null;
@@ -260,6 +307,13 @@ const zalouserMessageActions: ChannelMessageActionAdapter = {
       throw new Error(
         "Zalouser react requires messageId + cliMsgId (or a current message context id).",
       );
+    }
+    if (params.isGroup === true) {
+      assertZalouserOutboundGroupAllowed({
+        account,
+        cfg,
+        groupId: threadId,
+      });
     }
     const result = await sendReactionZalouser({
       profile: account.profile,
@@ -609,6 +663,13 @@ export const zalouserPlugin: ChannelPlugin<ResolvedZalouserAccount> = {
     sendText: async ({ to, text, accountId, cfg }) => {
       const account = resolveZalouserAccountSync({ cfg: cfg, accountId });
       const target = parseZalouserOutboundTarget(to);
+      if (target.isGroup) {
+        assertZalouserOutboundGroupAllowed({
+          account,
+          cfg,
+          groupId: target.threadId,
+        });
+      }
       const result = await sendMessageZalouser(target.threadId, text, {
         profile: account.profile,
         isGroup: target.isGroup,
@@ -618,6 +679,13 @@ export const zalouserPlugin: ChannelPlugin<ResolvedZalouserAccount> = {
     sendMedia: async ({ to, text, mediaUrl, accountId, cfg, mediaLocalRoots }) => {
       const account = resolveZalouserAccountSync({ cfg: cfg, accountId });
       const target = parseZalouserOutboundTarget(to);
+      if (target.isGroup) {
+        assertZalouserOutboundGroupAllowed({
+          account,
+          cfg,
+          groupId: target.threadId,
+        });
+      }
       const result = await sendMessageZalouser(target.threadId, text, {
         profile: account.profile,
         isGroup: target.isGroup,
