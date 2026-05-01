@@ -1,11 +1,23 @@
-import type { ReplyPayload } from "openclaw/plugin-sdk/zalouser";
+import type { OpenClawConfig, ReplyPayload } from "openclaw/plugin-sdk/zalouser";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { zalouserPlugin } from "./channel.js";
+import type { ZalouserAccountConfig } from "./types.js";
 
 vi.mock("./send.js", () => ({
   sendMessageZalouser: vi.fn().mockResolvedValue({ ok: true, messageId: "zlu-1" }),
   sendReactionZalouser: vi.fn().mockResolvedValue({ ok: true }),
 }));
+
+let mockAccountConfig: ZalouserAccountConfig = {};
+
+const configuredOpenZalouserConfig: OpenClawConfig = {
+  channels: {
+    zalouser: {
+      enabled: true,
+      groupPolicy: "open",
+    },
+  },
+};
 
 vi.mock("./accounts.js", async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
@@ -16,14 +28,14 @@ vi.mock("./accounts.js", async (importOriginal) => {
       profile: "default",
       name: "test",
       enabled: true,
-      config: {},
+      config: mockAccountConfig,
     }),
   };
 });
 
-function baseCtx(payload: ReplyPayload) {
+function baseCtx(payload: ReplyPayload, cfg: OpenClawConfig = {}) {
   return {
-    cfg: {},
+    cfg,
     to: "user:987654321",
     text: "",
     payload,
@@ -38,6 +50,7 @@ describe("zalouserPlugin outbound sendPayload", () => {
     mockedSend = vi.mocked(mod.sendMessageZalouser);
     mockedSend.mockClear();
     mockedSend.mockResolvedValue({ ok: true, messageId: "zlu-1" });
+    mockAccountConfig = {};
   });
 
   it("text-only delegates to sendText", async () => {
@@ -53,7 +66,7 @@ describe("zalouserPlugin outbound sendPayload", () => {
     mockedSend.mockResolvedValue({ ok: true, messageId: "zlu-g1" });
 
     const result = await zalouserPlugin.outbound!.sendPayload!({
-      ...baseCtx({ text: "hello group" }),
+      ...baseCtx({ text: "hello group" }, configuredOpenZalouserConfig),
       to: "group:1471383327500481391",
     });
 
@@ -63,6 +76,72 @@ describe("zalouserPlugin outbound sendPayload", () => {
       expect.objectContaining({ isGroup: true }),
     );
     expect(result).toMatchObject({ channel: "zalouser", messageId: "zlu-g1" });
+  });
+
+  it("blocks group targets denied by groupPolicy", async () => {
+    mockAccountConfig = {
+      groupPolicy: "allowlist",
+      groups: {
+        "g-allowed": { allow: true },
+      },
+    };
+
+    await expect(
+      zalouserPlugin.outbound!.sendPayload!({
+        ...baseCtx(
+          { text: "blocked group" },
+          {
+            channels: {
+              zalouser: {
+                enabled: true,
+                groupPolicy: "allowlist",
+                groups: {
+                  "g-allowed": { allow: true },
+                },
+              },
+            },
+          },
+        ),
+        to: "group:g-blocked",
+      }),
+    ).rejects.toThrow(/not allowlisted/);
+
+    expect(mockedSend).not.toHaveBeenCalled();
+  });
+
+  it("allows group targets matched by groupPolicy allowlist", async () => {
+    mockedSend.mockResolvedValue({ ok: true, messageId: "zlu-g-allowed" });
+    mockAccountConfig = {
+      groupPolicy: "allowlist",
+      groups: {
+        "g-allowed": { allow: true },
+      },
+    };
+
+    const result = await zalouserPlugin.outbound!.sendPayload!({
+      ...baseCtx(
+        { text: "allowed group" },
+        {
+          channels: {
+            zalouser: {
+              enabled: true,
+              groupPolicy: "allowlist",
+              groups: {
+                "g-allowed": { allow: true },
+              },
+            },
+          },
+        },
+      ),
+      to: "group:g-allowed",
+    });
+
+    expect(mockedSend).toHaveBeenCalledWith(
+      "g-allowed",
+      "allowed group",
+      expect.objectContaining({ isGroup: true }),
+    );
+    expect(result).toMatchObject({ channel: "zalouser", messageId: "zlu-g-allowed" });
   });
 
   it("single media delegates to sendMedia", async () => {
@@ -100,7 +179,7 @@ describe("zalouserPlugin outbound sendPayload", () => {
     mockedSend.mockResolvedValue({ ok: true, messageId: "zlu-g-native" });
 
     const result = await zalouserPlugin.outbound!.sendPayload!({
-      ...baseCtx({ text: "hello native group" }),
+      ...baseCtx({ text: "hello native group" }, configuredOpenZalouserConfig),
       to: "g-1471383327500481391",
     });
 
