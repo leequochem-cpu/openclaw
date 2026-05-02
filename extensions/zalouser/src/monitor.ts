@@ -100,6 +100,11 @@ function resolveUserAllowlistEntries(
       continue;
     }
     const matches = byName.get(entry.toLowerCase()) ?? [];
+    if (matches.length > 1) {
+      const ids = matches.map((match) => String(match.userId)).filter(Boolean).join(", ");
+      unresolved.push(ids ? `${entry} (ambiguous: ${ids})` : `${entry} (ambiguous)`);
+      continue;
+    }
     const match = matches[0];
     const id = match?.userId ? String(match.userId) : undefined;
     if (id) {
@@ -110,6 +115,47 @@ function resolveUserAllowlistEntries(
     }
   }
   return { additions, mapping, unresolved };
+}
+
+function resolveGroupAllowlistEntries<T>(
+  entries: string[],
+  groupsConfig: Record<string, T>,
+  byName: Map<string, Array<{ groupId: string }>>,
+): {
+  nextGroups: Record<string, T>;
+  mapping: string[];
+  unresolved: string[];
+} {
+  const mapping: string[] = [];
+  const unresolved: string[] = [];
+  const nextGroups = { ...groupsConfig };
+  for (const entry of entries) {
+    const cleaned = normalizeZalouserEntry(entry);
+    if (/^\d+$/.test(cleaned)) {
+      if (!nextGroups[cleaned]) {
+        nextGroups[cleaned] = groupsConfig[entry];
+      }
+      mapping.push(`${entry}→${cleaned}`);
+      continue;
+    }
+    const matches = byName.get(cleaned.toLowerCase()) ?? [];
+    if (matches.length > 1) {
+      const ids = matches.map((match) => String(match.groupId)).filter(Boolean).join(", ");
+      unresolved.push(ids ? `${entry} (ambiguous: ${ids})` : `${entry} (ambiguous)`);
+      continue;
+    }
+    const match = matches[0];
+    const id = match?.groupId ? String(match.groupId) : undefined;
+    if (id) {
+      if (!nextGroups[id]) {
+        nextGroups[id] = groupsConfig[entry];
+      }
+      mapping.push(`${entry}→${id}`);
+    } else {
+      unresolved.push(entry);
+    }
+  }
+  return { nextGroups, mapping, unresolved };
 }
 
 type ZalouserCoreRuntime = ReturnType<typeof getZalouserRuntime>;
@@ -811,30 +857,11 @@ export async function monitorZalouserProvider(
     if (groupKeys.length > 0) {
       const groups = await listZaloGroups(profile);
       const byName = buildNameIndex(groups, (group) => group.name);
-      const mapping: string[] = [];
-      const unresolved: string[] = [];
-      const nextGroups = { ...groupsConfig };
-      for (const entry of groupKeys) {
-        const cleaned = normalizeZalouserEntry(entry);
-        if (/^\d+$/.test(cleaned)) {
-          if (!nextGroups[cleaned]) {
-            nextGroups[cleaned] = groupsConfig[entry];
-          }
-          mapping.push(`${entry}→${cleaned}`);
-          continue;
-        }
-        const matches = byName.get(cleaned.toLowerCase()) ?? [];
-        const match = matches[0];
-        const id = match?.groupId ? String(match.groupId) : undefined;
-        if (id) {
-          if (!nextGroups[id]) {
-            nextGroups[id] = groupsConfig[entry];
-          }
-          mapping.push(`${entry}→${id}`);
-        } else {
-          unresolved.push(entry);
-        }
-      }
+      const { nextGroups, mapping, unresolved } = resolveGroupAllowlistEntries(
+        groupKeys,
+        groupsConfig,
+        byName,
+      );
       account = {
         ...account,
         config: {
@@ -951,6 +978,8 @@ export async function monitorZalouserProvider(
 }
 
 export const __testing = {
+  resolveUserAllowlistEntries,
+  resolveGroupAllowlistEntries,
   processMessage: async (params: {
     message: ZaloInboundMessage;
     account: ResolvedZalouserAccount;

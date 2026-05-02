@@ -224,6 +224,54 @@ describe("zalouser monitor group mention gating", () => {
     sendSeenZalouserMock.mockClear();
   });
 
+  it("does not resolve ambiguous user allowlist names", () => {
+    const result = __testing.resolveUserAllowlistEntries(
+      ["Alice", "Bob"],
+      new Map([
+        [
+          "alice",
+          [
+            { userId: "111" },
+            { userId: "222" },
+          ],
+        ],
+        ["bob", [{ userId: "333" }]],
+      ]),
+    );
+
+    expect(result.additions).toEqual(["333"]);
+    expect(result.mapping).toEqual(["Bob->333"]);
+    expect(result.unresolved).toEqual(["Alice (ambiguous: 111, 222)"]);
+  });
+
+  it("does not resolve ambiguous group names", () => {
+    const result = __testing.resolveGroupAllowlistEntries(
+      ["Team", "Crew"],
+      {
+        Team: { requireMention: true },
+        Crew: { requireMention: false },
+      },
+      new Map([
+        [
+          "team",
+          [
+            { groupId: "g-1" },
+            { groupId: "g-2" },
+          ],
+        ],
+        ["crew", [{ groupId: "g-3" }]],
+      ]),
+    );
+
+    expect(result.nextGroups).toEqual({
+      Team: { requireMention: true },
+      Crew: { requireMention: false },
+      "g-3": { requireMention: false },
+    });
+    expect(result.mapping).toEqual(["Crew→g-3"]);
+    expect(result.unresolved).toEqual(["Team (ambiguous: g-1, g-2)"]);
+  });
+
   it("skips unmentioned group messages when requireMention=true", async () => {
     const { dispatchReplyWithBufferedBlockDispatcher } = installRuntime({
       commandAuthorized: false,
