@@ -21,7 +21,7 @@ const inspectPortUsage = vi.fn();
 const classifyPortListener = vi.fn();
 const formatPortDiagnostics = vi.fn();
 const pathExists = vi.fn();
-const sleep = vi.fn(async () => {});
+const sleep = vi.fn(async (_ms?: number) => {});
 const syncPluginsForUpdateChannel = vi.fn();
 const updateNpmInstalledPlugins = vi.fn();
 
@@ -81,7 +81,7 @@ vi.mock("../utils.js", async (importOriginal) => {
   return {
     ...actual,
     pathExists: (...args: unknown[]) => pathExists(...args),
-    sleep: (...args: unknown[]) => sleep(...args),
+    sleep: (ms?: number) => sleep(ms),
   };
 });
 
