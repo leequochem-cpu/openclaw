@@ -509,7 +509,7 @@ async function maybeRestartService(params: {
   refreshServiceEnv: boolean;
   gatewayPort: number;
   restartScriptPath?: string | null;
-}): Promise<void> {
+}): Promise<boolean> {
   if (params.shouldRestart) {
     if (!params.opts.json) {
       defaultRuntime.log("");
@@ -564,6 +564,7 @@ async function maybeRestartService(params: {
         let health = await waitForGatewayHealthyRestart({
           service,
           port: params.gatewayPort,
+          includeUnknownListenersAsStale: process.platform === "win32",
         });
         if (!health.healthy && health.staleGatewayPids.length > 0) {
           if (!params.opts.json) {
@@ -578,6 +579,7 @@ async function maybeRestartService(params: {
           health = await waitForGatewayHealthyRestart({
             service,
             port: params.gatewayPort,
+            includeUnknownListenersAsStale: process.platform === "win32",
           });
         }
 
@@ -593,6 +595,7 @@ async function maybeRestartService(params: {
               `Run \`${replaceCliName(formatCliCommand("openclaw gateway status --deep"), CLI_NAME)}\` for details.`,
             ),
           );
+          return false;
         }
         defaultRuntime.log("");
       }
@@ -605,8 +608,9 @@ async function maybeRestartService(params: {
           ),
         );
       }
+      return false;
     }
-    return;
+    return true;
   }
 
   if (!params.opts.json) {
@@ -625,6 +629,7 @@ async function maybeRestartService(params: {
       );
     }
   }
+  return true;
 }
 
 export async function updateCommand(opts: UpdateCommandOptions): Promise<void> {
@@ -903,7 +908,7 @@ export async function updateCommand(opts: UpdateCommandOptions): Promise<void> {
     skipPrompt: Boolean(opts.yes),
   });
 
-  await maybeRestartService({
+  const restartOk = await maybeRestartService({
     shouldRestart,
     result,
     opts,
@@ -911,6 +916,10 @@ export async function updateCommand(opts: UpdateCommandOptions): Promise<void> {
     gatewayPort,
     restartScriptPath,
   });
+  if (!restartOk) {
+    defaultRuntime.exit(1);
+    return;
+  }
 
   if (!opts.json) {
     defaultRuntime.log(theme.muted(pickUpdateQuip()));

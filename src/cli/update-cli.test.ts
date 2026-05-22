@@ -21,6 +21,7 @@ const inspectPortUsage = vi.fn();
 const classifyPortListener = vi.fn();
 const formatPortDiagnostics = vi.fn();
 const pathExists = vi.fn();
+const sleep = vi.fn(async () => {});
 const syncPluginsForUpdateChannel = vi.fn();
 const updateNpmInstalledPlugins = vi.fn();
 
@@ -80,6 +81,7 @@ vi.mock("../utils.js", async (importOriginal) => {
   return {
     ...actual,
     pathExists: (...args: unknown[]) => pathExists(...args),
+    sleep: (...args: unknown[]) => sleep(...args),
   };
 });
 
@@ -321,6 +323,7 @@ describe("update-cli", () => {
     classifyPortListener.mockReturnValue("gateway");
     formatPortDiagnostics.mockReturnValue(["Port 18789 is already in use."]);
     pathExists.mockResolvedValue(false);
+    sleep.mockResolvedValue(undefined);
     syncPluginsForUpdateChannel.mockResolvedValue({
       changed: false,
       config: baseConfig,
@@ -562,6 +565,30 @@ describe("update-cli", () => {
     expect(runDaemonInstall).not.toHaveBeenCalled();
     expect(runRestartScript).not.toHaveBeenCalled();
     expect(runDaemonRestart).not.toHaveBeenCalled();
+  });
+
+  it("updateCommand exits when detached restart never becomes healthy", async () => {
+    vi.mocked(runGatewayUpdate).mockResolvedValue(makeOkUpdateResult());
+    serviceLoaded.mockResolvedValue(true);
+    serviceReadRuntime.mockResolvedValue({
+      status: "stopped",
+      state: "stopped",
+    });
+    inspectPortUsage.mockResolvedValue({
+      port: 18789,
+      status: "free",
+      listeners: [],
+      hints: [],
+    });
+    vi.mocked(defaultRuntime.exit).mockClear();
+    vi.mocked(defaultRuntime.log).mockClear();
+
+    await updateCommand({});
+
+    expect(defaultRuntime.exit).toHaveBeenCalledWith(1);
+    const logLines = vi.mocked(defaultRuntime.log).mock.calls.map((call) => String(call[0]));
+    expect(logLines.some((line) => line.includes("Gateway did not become healthy"))).toBe(true);
+    expect(logLines.some((line) => line.includes("Leveled up!"))).toBe(false);
   });
 
   it("updateCommand continues after doctor sub-step and clears update flag", async () => {
