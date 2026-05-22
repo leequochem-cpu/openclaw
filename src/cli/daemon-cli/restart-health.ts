@@ -148,8 +148,8 @@ export async function inspectGatewayRestart(params: {
           listenerOwnedByRuntimePid({ listener, runtimePid }),
         ) || listenerAttributionGap
       : gatewayListeners.length > 0 || listenerAttributionGap;
-  let healthy = running && ownsPort;
-  if (!healthy && running && portUsage.status === "busy") {
+  let healthy = running && ownsPort && !listenerAttributionGap;
+  if (running && portUsage.status === "busy" && (!healthy || listenerAttributionGap)) {
     try {
       healthy = await confirmGatewayReachable(params.port);
     } catch {

@@ -199,10 +199,14 @@ describe("inspectGatewayRestart", () => {
     expect(snapshot.healthy).toBe(true);
   });
 
-  it("treats busy ports with unavailable listener details as healthy when runtime is running", async () => {
+  it("probes busy ports with unavailable listener details before marking healthy", async () => {
     const service = {
       readRuntime: vi.fn(async () => ({ status: "running", pid: 8000 })),
     } as unknown as GatewayService;
+    probeGateway.mockResolvedValue({
+      ok: true,
+      close: null,
+    });
 
     inspectPortUsage.mockResolvedValue({
       port: 18789,
@@ -218,6 +222,33 @@ describe("inspectGatewayRestart", () => {
     const snapshot = await inspectGatewayRestart({ service, port: 18789 });
 
     expect(snapshot.healthy).toBe(true);
-    expect(probeGateway).not.toHaveBeenCalled();
+    expect(probeGateway).toHaveBeenCalledWith(
+      expect.objectContaining({ url: "ws://127.0.0.1:18789" }),
+    );
+  });
+
+  it("does not mark attribution gaps healthy when the gateway probe fails", async () => {
+    const service = {
+      readRuntime: vi.fn(async () => ({ status: "running", pid: 8000 })),
+    } as unknown as GatewayService;
+    probeGateway.mockResolvedValue({
+      ok: false,
+      close: null,
+    });
+
+    inspectPortUsage.mockResolvedValue({
+      port: 18789,
+      status: "busy",
+      listeners: [],
+      hints: [
+        "Port is in use but process details are unavailable (install lsof or run as an admin user).",
+      ],
+      errors: ["Error: spawn lsof ENOENT"],
+    });
+
+    const { inspectGatewayRestart } = await import("./restart-health.js");
+    const snapshot = await inspectGatewayRestart({ service, port: 18789 });
+
+    expect(snapshot.healthy).toBe(false);
   });
 });
