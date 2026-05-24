@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import os from "node:os";
+import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const execFileMock = vi.hoisted(() => vi.fn());
@@ -13,11 +14,13 @@ import { parseSystemdExecStart } from "./systemd-unit.js";
 import {
   isNonFatalSystemdInstallProbeError,
   isSystemdUserServiceAvailable,
+  installSystemdService,
   parseSystemdShow,
   readSystemdServiceExecStart,
   restartSystemdService,
   resolveSystemdUserUnitPath,
   stopSystemdService,
+  uninstallSystemdService,
 } from "./systemd.js";
 
 type ExecFileError = Error & {
@@ -773,5 +776,70 @@ describe("systemd service control", () => {
         cb(null, "", "");
       });
     await assertRestartSuccess({ USER: "debian" });
+  });
+
+  it("installs the resolved user unit when OPENCLAW_SYSTEMD_UNIT is set", async () => {
+    const home = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-systemd-install-"));
+    const stdout = { write: vi.fn() } as unknown as NodeJS.WritableStream;
+    execFileMock
+      .mockImplementationOnce((_cmd, args, _opts, cb) => {
+        expect(args).toEqual(["--user", "status"]);
+        cb(null, "", "");
+      })
+      .mockImplementationOnce((_cmd, args, _opts, cb) => {
+        expect(args).toEqual(["--user", "daemon-reload"]);
+        cb(null, "", "");
+      })
+      .mockImplementationOnce((_cmd, args, _opts, cb) => {
+        expect(args).toEqual(["--user", "enable", "openclaw-node.service"]);
+        cb(null, "", "");
+      })
+      .mockImplementationOnce((_cmd, args, _opts, cb) => {
+        expect(args).toEqual(["--user", "restart", "openclaw-node.service"]);
+        cb(null, "", "");
+      });
+
+    const result = await installSystemdService({
+      env: { HOME: home, OPENCLAW_SYSTEMD_UNIT: "openclaw-node" },
+      stdout,
+      programArguments: ["/usr/bin/openclaw", "node", "run"],
+      workingDirectory: "/workspace",
+      environment: {},
+    });
+
+    expect(result.unitPath).toBe(
+      path.join(home, ".config", "systemd", "user", "openclaw-node.service"),
+    );
+    expect(await fs.readFile(result.unitPath, "utf8")).toContain(
+      "ExecStart=/usr/bin/openclaw node run",
+    );
+  });
+
+  it("uninstalls the resolved user unit when OPENCLAW_SYSTEMD_UNIT is set", async () => {
+    const home = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-systemd-uninstall-"));
+    const unitDir = path.join(home, ".config", "systemd", "user");
+    const nodeUnitPath = path.join(unitDir, "openclaw-node.service");
+    const gatewayUnitPath = path.join(unitDir, "openclaw-gateway.service");
+    await fs.mkdir(unitDir, { recursive: true });
+    await fs.writeFile(nodeUnitPath, "[Unit]\nDescription=OpenClaw Node Host\n", "utf8");
+    await fs.writeFile(gatewayUnitPath, "[Unit]\nDescription=OpenClaw Gateway\n", "utf8");
+    const stdout = { write: vi.fn() } as unknown as NodeJS.WritableStream;
+    execFileMock
+      .mockImplementationOnce((_cmd, args, _opts, cb) => {
+        expect(args).toEqual(["--user", "status"]);
+        cb(null, "", "");
+      })
+      .mockImplementationOnce((_cmd, args, _opts, cb) => {
+        expect(args).toEqual(["--user", "disable", "--now", "openclaw-node.service"]);
+        cb(null, "", "");
+      });
+
+    await uninstallSystemdService({
+      env: { HOME: home, OPENCLAW_SYSTEMD_UNIT: "openclaw-node" },
+      stdout,
+    });
+
+    await expect(fs.access(nodeUnitPath)).rejects.toThrow();
+    await expect(fs.access(gatewayUnitPath)).resolves.toBeUndefined();
   });
 });
