@@ -70,6 +70,7 @@ const assertRestartSuccess = async (env: NodeJS.ProcessEnv) => {
 
 describe("systemd availability", () => {
   beforeEach(() => {
+    vi.restoreAllMocks();
     execFileMock.mockReset();
   });
 
