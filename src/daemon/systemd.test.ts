@@ -639,6 +639,7 @@ describe("systemd service control", () => {
   };
 
   beforeEach(() => {
+    vi.restoreAllMocks();
     execFileMock.mockReset();
   });
 
