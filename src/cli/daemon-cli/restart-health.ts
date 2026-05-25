@@ -144,9 +144,7 @@ export async function inspectGatewayRestart(params: {
   const listenerAttributionGap = hasListenerAttributionGap(portUsage);
   const ownsPortByListener =
     runtimePid != null
-      ? portUsage.listeners.some((listener) =>
-          listenerOwnedByRuntimePid({ listener, runtimePid }),
-        )
+      ? portUsage.listeners.some((listener) => listenerOwnedByRuntimePid({ listener, runtimePid }))
       : gatewayListeners.length > 0;
   const ownsPort = ownsPortByListener || listenerAttributionGap;
   let healthy = running && ownsPort;
