@@ -26,6 +26,7 @@ import {
   resolveOpenProviderRuntimeGroupPolicy,
   resolveDefaultGroupPolicy,
   resolveSenderCommandAuthorization,
+  resolveSenderScopedGroupPolicy,
   sendMediaWithLeadingCaption,
   summarizeMapping,
   warnMissingProviderGroupPolicyFallbackOnce,
@@ -361,13 +362,20 @@ async function processMessage(
     !isGroup && dmPolicy !== "allowlist" && (dmPolicy !== "open" || shouldComputeCommandAuth)
       ? await pairing.readAllowFromStore().catch(() => [])
       : [];
+  const effectiveConfiguredGroupAllowFrom =
+    configGroupAllowFrom.length > 0 ? configGroupAllowFrom : configAllowFrom;
+  const senderGroupPolicy = resolveSenderScopedGroupPolicy({
+    groupPolicy,
+    groupAllowFrom: effectiveConfiguredGroupAllowFrom,
+  });
   const accessDecision = resolveDmGroupAccessWithLists({
     isGroup,
     dmPolicy,
-    groupPolicy,
+    groupPolicy: senderGroupPolicy,
     allowFrom: configAllowFrom,
     groupAllowFrom: configGroupAllowFrom,
     storeAllowFrom,
+    groupAllowFromFallbackToAllowFrom: true,
     isSenderAllowed: (allowFrom) => isSenderAllowed(senderId, allowFrom),
   });
   if (isGroup && accessDecision.decision !== "allow") {
