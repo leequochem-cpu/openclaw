@@ -304,6 +304,44 @@ describe("zalouser monitor group mention gating", () => {
     expect(callArg?.ctx?.WasMentioned).toBe(true);
   });
 
+  it("allows messages from allowlisted group routes without a sender allowlist", async () => {
+    const { dispatchReplyWithBufferedBlockDispatcher } = installRuntime({
+      commandAuthorized: false,
+    });
+    await __testing.processMessage({
+      message: createGroupMessage({
+        content: "ping @bot",
+        hasAnyMention: true,
+        wasExplicitlyMentioned: true,
+      }),
+      account: {
+        ...createAccount(),
+        config: {
+          ...createAccount().config,
+          groupPolicy: "allowlist",
+          groups: {
+            "g-1": { requireMention: true },
+          },
+        },
+      },
+      config: {
+        ...createConfig(),
+        channels: {
+          zalouser: {
+            ...createConfig().channels!.zalouser,
+            groupPolicy: "allowlist",
+            groups: {
+              "g-1": { requireMention: true },
+            },
+          },
+        },
+      },
+      runtime: createRuntimeEnv(),
+    });
+
+    expect(dispatchReplyWithBufferedBlockDispatcher).toHaveBeenCalledTimes(1);
+  });
+
   it("uses commandContent for mention-prefixed control commands", async () => {
     const { dispatchReplyWithBufferedBlockDispatcher } = installRuntime({
       commandAuthorized: true,
