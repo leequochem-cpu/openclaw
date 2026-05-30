@@ -1,10 +1,10 @@
-import type { Context } from "@mariozechner/pi-ai";
+import type { Api, Context, Model } from "@mariozechner/pi-ai";
 import { complete } from "@mariozechner/pi-ai";
 import { isMinimaxVlmModel, minimaxUnderstandImage } from "../../agents/minimax-vlm.js";
 import { getApiKeyForModel, requireApiKey } from "../../agents/model-auth.js";
+import { resolveForwardCompatModel } from "../../agents/model-forward-compat.js";
 import { normalizeModelRef } from "../../agents/model-selection.js";
 import { ensureOpenClawModelsJson } from "../../agents/models-config.js";
-import { resolveModelWithRegistry } from "../../agents/pi-embedded-runner/model.js";
 import { coerceImageAssistantText } from "../../agents/tools/image-tool.helpers.js";
 import type { ImageDescriptionRequest, ImageDescriptionResult } from "../types.js";
 
@@ -26,12 +26,9 @@ export async function describeImageWithModel(
   const modelRegistry = discoverModels(authStorage, params.agentDir);
   // Keep direct media config entries compatible with deprecated provider model aliases.
   const resolvedRef = normalizeModelRef(params.provider, params.model);
-  const model = resolveModelWithRegistry({
-    provider: resolvedRef.provider,
-    modelId: resolvedRef.model,
-    modelRegistry,
-    cfg: params.cfg,
-  });
+  const model =
+    (modelRegistry.find(resolvedRef.provider, resolvedRef.model) as Model<Api> | null) ??
+    resolveForwardCompatModel(resolvedRef.provider, resolvedRef.model, modelRegistry);
   if (!model) {
     throw new Error(`Unknown model: ${resolvedRef.provider}/${resolvedRef.model}`);
   }
