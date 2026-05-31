@@ -148,14 +148,6 @@ export async function inspectGatewayRestart(params: {
           listenerOwnedByRuntimePid({ listener, runtimePid }),
         ) || listenerAttributionGap
       : gatewayListeners.length > 0 || listenerAttributionGap;
-  let healthy = running && ownsPort;
-  if (!healthy && running && portUsage.status === "busy") {
-    try {
-      healthy = await confirmGatewayReachable(params.port);
-    } catch {
-      // best-effort probe
-    }
-  }
   const staleGatewayPids = Array.from(
     new Set([
       ...gatewayListeners
@@ -165,7 +157,7 @@ export async function inspectGatewayRestart(params: {
             return true;
           }
           if (runtimePid == null) {
-            return true;
+            return false;
           }
           return !listenerOwnedByRuntimePid({ listener, runtimePid });
         })
@@ -175,6 +167,14 @@ export async function inspectGatewayRestart(params: {
       ),
     ]),
   );
+  let healthy = running && ownsPort && staleGatewayPids.length === 0;
+  if (!healthy && running && staleGatewayPids.length === 0 && portUsage.status === "busy") {
+    try {
+      healthy = await confirmGatewayReachable(params.port);
+    } catch {
+      // best-effort probe
+    }
+  }
 
   return {
     runtime,
