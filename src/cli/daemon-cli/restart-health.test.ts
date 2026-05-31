@@ -126,6 +126,46 @@ describe("inspectGatewayRestart", () => {
     expect(snapshot.staleGatewayPids).toEqual([9000]);
   });
 
+  it("does not let a reachable stale gateway satisfy restart health", async () => {
+    const service = {
+      readRuntime: vi.fn(async () => ({ status: "running", pid: 8000 })),
+    } as unknown as GatewayService;
+
+    inspectPortUsage.mockResolvedValue({
+      port: 18789,
+      status: "busy",
+      listeners: [{ pid: 9000, ppid: 8999, commandLine: "openclaw-gateway" }],
+      hints: [],
+    });
+    probeGateway.mockResolvedValue({ ok: true, close: null });
+
+    const { inspectGatewayRestart } = await import("./restart-health.js");
+    const snapshot = await inspectGatewayRestart({ service, port: 18789 });
+
+    expect(snapshot.healthy).toBe(false);
+    expect(snapshot.staleGatewayPids).toEqual([9000]);
+    expect(probeGateway).not.toHaveBeenCalled();
+  });
+
+  it("does not mark gateway listeners stale when a running runtime has no pid", async () => {
+    const service = {
+      readRuntime: vi.fn(async () => ({ status: "running" })),
+    } as unknown as GatewayService;
+
+    inspectPortUsage.mockResolvedValue({
+      port: 18789,
+      status: "busy",
+      listeners: [{ pid: 9000, commandLine: "openclaw-gateway" }],
+      hints: [],
+    });
+
+    const { inspectGatewayRestart } = await import("./restart-health.js");
+    const snapshot = await inspectGatewayRestart({ service, port: 18789 });
+
+    expect(snapshot.healthy).toBe(true);
+    expect(snapshot.staleGatewayPids).toEqual([]);
+  });
+
   it("treats unknown listeners as stale on Windows when enabled", async () => {
     const snapshot = await inspectUnknownListenerFallback({
       runtime: { status: "stopped" },

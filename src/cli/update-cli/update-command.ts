@@ -564,6 +564,7 @@ async function maybeRestartService(params: {
         let health = await waitForGatewayHealthyRestart({
           service,
           port: params.gatewayPort,
+          includeUnknownListenersAsStale: process.platform === "win32",
         });
         if (!health.healthy && health.staleGatewayPids.length > 0) {
           if (!params.opts.json) {
@@ -578,6 +579,7 @@ async function maybeRestartService(params: {
           health = await waitForGatewayHealthyRestart({
             service,
             port: params.gatewayPort,
+            includeUnknownListenersAsStale: process.platform === "win32",
           });
         }
 
