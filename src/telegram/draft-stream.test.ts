@@ -218,6 +218,27 @@ describe("createTelegramDraftStream", () => {
     );
   });
 
+  it("does not retry forum message preview sends without thread when topic lookup fails", async () => {
+    const api = createMockDraftApi();
+    api.sendMessage.mockRejectedValueOnce(
+      new Error("400: Bad Request: message thread not found"),
+    );
+    const warn = vi.fn();
+    const stream = createDraftStream(api, {
+      thread: { id: 99, scope: "forum" },
+      warn,
+    });
+
+    stream.update("Hello");
+    await stream.flush();
+
+    expect(api.sendMessage).toHaveBeenCalledTimes(1);
+    expect(api.sendMessage).toHaveBeenNthCalledWith(1, 123, "Hello", { message_thread_id: 99 });
+    expect(warn).toHaveBeenCalledWith(
+      "telegram stream preview failed: 400: Bad Request: message thread not found",
+    );
+  });
+
   it("materializes draft previews using rendered HTML text", async () => {
     const api = createMockDraftApi();
     const stream = createDraftStream(api, {
@@ -285,6 +306,30 @@ describe("createTelegramDraftStream", () => {
     expect(clearCall?.[3]).toBeUndefined();
     expect(warn).toHaveBeenCalledWith(
       "telegram stream preview materialize send failed with message_thread_id, retrying without thread",
+    );
+  });
+
+  it("does not retry forum materialize sends without thread when topic lookup fails", async () => {
+    const api = createMockDraftApi();
+    api.sendMessage.mockRejectedValueOnce(
+      new Error("400: Bad Request: message thread not found"),
+    );
+    const warn = vi.fn();
+    const stream = createDraftStream(api, {
+      thread: { id: 99, scope: "forum" },
+      previewTransport: "draft",
+      warn,
+    });
+
+    stream.update("Hello");
+    await stream.flush();
+    const materializedId = await stream.materialize?.();
+
+    expect(materializedId).toBeUndefined();
+    expect(api.sendMessage).toHaveBeenCalledTimes(1);
+    expect(api.sendMessage).toHaveBeenNthCalledWith(1, 123, "Hello", { message_thread_id: 99 });
+    expect(warn).toHaveBeenCalledWith(
+      "telegram stream preview materialize failed: 400: Bad Request: message thread not found",
     );
   });
 

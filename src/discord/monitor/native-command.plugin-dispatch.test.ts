@@ -34,13 +34,14 @@ vi.mock("../../acp/persistent-bindings.js", async (importOriginal) => {
 });
 
 function createInteraction(params?: {
+  userId?: string;
   channelType?: ChannelType;
   channelId?: string;
   guildId?: string;
   guildName?: string;
 }): MockCommandInteraction {
   return createMockCommandInteraction({
-    userId: "owner",
+    userId: params?.userId ?? "owner",
     username: "tester",
     globalName: "Tester",
     channelType: params?.channelType ?? ChannelType.DM,
@@ -186,6 +187,67 @@ describe("Discord native plugin command dispatch", () => {
     expect(dispatchSpy).not.toHaveBeenCalled();
     expect(interaction.reply).toHaveBeenCalledWith(
       expect.objectContaining({ content: "direct plugin output" }),
+    );
+  });
+
+  it("blocks DM plugin slash commands when commands.allowFrom does not match", async () => {
+    const cfg = {
+      commands: {
+        allowFrom: {
+          discord: ["user:owner"],
+        },
+      },
+      channels: {
+        discord: {
+          dm: { enabled: true, policy: "open" },
+        },
+      },
+    } as OpenClawConfig;
+    const commandSpec: NativeCommandSpec = {
+      name: "cron_jobs",
+      description: "List cron jobs",
+      acceptsArgs: false,
+    };
+    const command = createDiscordNativeCommand({
+      command: commandSpec,
+      cfg,
+      discordConfig: cfg.channels?.discord ?? {},
+      accountId: "default",
+      sessionPrefix: "discord:slash",
+      ephemeralDefault: true,
+      threadBindings: createNoopThreadBindingManager("default"),
+    });
+    const interaction = createInteraction({ userId: "intruder" });
+    const pluginMatch = {
+      command: {
+        name: "cron_jobs",
+        description: "List cron jobs",
+        pluginId: "cron-jobs",
+        acceptsArgs: false,
+        handler: vi.fn().mockResolvedValue({ text: "jobs" }),
+      },
+      args: undefined,
+    };
+
+    vi.spyOn(pluginCommandsModule, "matchPluginCommand").mockReturnValue(
+      pluginMatch as ReturnType<typeof pluginCommandsModule.matchPluginCommand>,
+    );
+    const executeSpy = vi
+      .spyOn(pluginCommandsModule, "executePluginCommand")
+      .mockResolvedValue({ text: "direct plugin output" });
+    const dispatchSpy = vi
+      .spyOn(dispatcherModule, "dispatchReplyWithDispatcher")
+      .mockResolvedValue({} as never);
+
+    await (command as { run: (interaction: unknown) => Promise<void> }).run(interaction as unknown);
+
+    expect(executeSpy).not.toHaveBeenCalled();
+    expect(dispatchSpy).not.toHaveBeenCalled();
+    expect(interaction.reply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: "You are not authorized to use this command.",
+        ephemeral: true,
+      }),
     );
   });
 
