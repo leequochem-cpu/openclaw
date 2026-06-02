@@ -1462,6 +1462,13 @@ async function dispatchDiscordCommandInteraction(params: {
       });
       return;
     }
+    if (commandsAllowFromAccess.configured) {
+      commandAuthorized = commandsAllowFromAccess.allowed;
+      if (!commandAuthorized) {
+        await respond("You are not authorized to use this command.", { ephemeral: true });
+        return;
+      }
+    }
   }
   if (!isDirectMessage) {
     const { hasAccessRestrictions, memberAllowed } = resolveDiscordMemberAccessState({

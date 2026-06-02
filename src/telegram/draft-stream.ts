@@ -111,6 +111,7 @@ export function createTelegramDraftStream(params: {
         ? false
         : params.thread?.scope === "dm";
   const threadParams = buildTelegramThreadParams(params.thread);
+  const canRetryWithoutThread = params.thread?.scope === "dm";
   const replyParams =
     params.replyToMessageId != null
       ? { ...threadParams, reply_to_message_id: params.replyToMessageId }
@@ -159,7 +160,7 @@ export function createTelegramDraftStream(params: {
         usedThreadParams,
       };
     } catch (err) {
-      if (!usedThreadParams || !THREAD_NOT_FOUND_RE.test(String(err))) {
+      if (!usedThreadParams || !canRetryWithoutThread || !THREAD_NOT_FOUND_RE.test(String(err))) {
         throw err;
       }
       const threadlessParams = {
