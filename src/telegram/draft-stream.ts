@@ -160,11 +160,7 @@ export function createTelegramDraftStream(params: {
         usedThreadParams,
       };
     } catch (err) {
-      if (
-        !usedThreadParams ||
-        !canRetryWithoutThread ||
-        !THREAD_NOT_FOUND_RE.test(String(err))
-      ) {
+      if (!usedThreadParams || !canRetryWithoutThread || !THREAD_NOT_FOUND_RE.test(String(err))) {
         throw err;
       }
       const threadlessParams = {

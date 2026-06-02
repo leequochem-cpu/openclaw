@@ -220,9 +220,7 @@ describe("createTelegramDraftStream", () => {
 
   it("does not retry forum message preview sends without thread when topic lookup fails", async () => {
     const api = createMockDraftApi();
-    api.sendMessage.mockRejectedValueOnce(
-      new Error("400: Bad Request: message thread not found"),
-    );
+    api.sendMessage.mockRejectedValueOnce(new Error("400: Bad Request: message thread not found"));
     const warn = vi.fn();
     const stream = createDraftStream(api, {
       thread: { id: 99, scope: "forum" },
@@ -311,9 +309,7 @@ describe("createTelegramDraftStream", () => {
 
   it("does not retry forum materialize sends without thread when topic lookup fails", async () => {
     const api = createMockDraftApi();
-    api.sendMessage.mockRejectedValueOnce(
-      new Error("400: Bad Request: message thread not found"),
-    );
+    api.sendMessage.mockRejectedValueOnce(new Error("400: Bad Request: message thread not found"));
     const warn = vi.fn();
     const stream = createDraftStream(api, {
       thread: { id: 99, scope: "forum" },
