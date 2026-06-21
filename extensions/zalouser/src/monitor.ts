@@ -25,6 +25,7 @@ import {
   resolveMentionGatingWithBypass,
   resolveOpenProviderRuntimeGroupPolicy,
   resolveDefaultGroupPolicy,
+  resolveSenderScopedGroupPolicy,
   resolveSenderCommandAuthorization,
   sendMediaWithLeadingCaption,
   summarizeMapping,
@@ -353,6 +354,12 @@ async function processMessage(
   const dmPolicy = account.config.dmPolicy ?? "pairing";
   const configAllowFrom = (account.config.allowFrom ?? []).map((v) => String(v));
   const configGroupAllowFrom = (account.config.groupAllowFrom ?? []).map((v) => String(v));
+  const senderGroupAllowFrom =
+    configGroupAllowFrom.length > 0 ? configGroupAllowFrom : configAllowFrom;
+  const senderGroupPolicy = resolveSenderScopedGroupPolicy({
+    groupPolicy,
+    groupAllowFrom: senderGroupAllowFrom.map((value) => value.trim()).filter(Boolean),
+  });
   const shouldComputeCommandAuth = core.channel.commands.shouldComputeCommandAuthorized(
     commandBody,
     config,
@@ -364,7 +371,7 @@ async function processMessage(
   const accessDecision = resolveDmGroupAccessWithLists({
     isGroup,
     dmPolicy,
-    groupPolicy,
+    groupPolicy: senderGroupPolicy,
     allowFrom: configAllowFrom,
     groupAllowFrom: configGroupAllowFrom,
     storeAllowFrom,
