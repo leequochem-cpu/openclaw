@@ -54,8 +54,12 @@ describe("normalizeGoogleModelId", () => {
     expect(normalizeGoogleModelId("gemini-3.1-flash-preview")).toBe("gemini-3-flash-preview");
   });
 
-  it("adds the preview suffix for gemini 3.1 flash-lite", () => {
-    expect(normalizeGoogleModelId("gemini-3.1-flash-lite")).toBe("gemini-3.1-flash-lite-preview");
+  it("keeps gemini 3.1 flash-lite on the GA model id", () => {
+    expect(normalizeGoogleModelId("gemini-3.1-flash-lite")).toBe("gemini-3.1-flash-lite");
+  });
+
+  it("maps the shut down gemini 3.1 flash-lite preview id to the GA model", () => {
+    expect(normalizeGoogleModelId("gemini-3.1-flash-lite-preview")).toBe("gemini-3.1-flash-lite");
   });
 });
 
