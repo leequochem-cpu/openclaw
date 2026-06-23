@@ -2243,7 +2243,7 @@ Yes. OpenClaw ships a few default shorthands (only applied when the model exists
 - `gpt-mini` → `openai/gpt-5-mini`
 - `gemini` → `google/gemini-3.1-pro-preview`
 - `gemini-flash` → `google/gemini-3-flash-preview`
-- `gemini-flash-lite` → `google/gemini-3.1-flash-lite-preview`
+- `gemini-flash-lite` → `google/gemini-3.1-flash-lite`
 
 If you set your own alias with the same name, your value wins.
 

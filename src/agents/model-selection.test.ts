@@ -125,14 +125,25 @@ describe("model-selection", () => {
       });
     });
 
-    it("normalizes gemini 3.1 flash-lite to the preview model id", () => {
+    it("keeps gemini 3.1 flash-lite on the GA model id", () => {
       expect(parseModelRef("google/gemini-3.1-flash-lite", "openai")).toEqual({
         provider: "google",
-        model: "gemini-3.1-flash-lite-preview",
+        model: "gemini-3.1-flash-lite",
       });
       expect(parseModelRef("gemini-3.1-flash-lite", "google")).toEqual({
         provider: "google",
-        model: "gemini-3.1-flash-lite-preview",
+        model: "gemini-3.1-flash-lite",
+      });
+    });
+
+    it("normalizes the shut down gemini 3.1 flash-lite preview id to the GA model id", () => {
+      expect(parseModelRef("google/gemini-3.1-flash-lite-preview", "openai")).toEqual({
+        provider: "google",
+        model: "gemini-3.1-flash-lite",
+      });
+      expect(parseModelRef("gemini-3.1-flash-lite-preview", "google")).toEqual({
+        provider: "google",
+        model: "gemini-3.1-flash-lite",
       });
     });
 
