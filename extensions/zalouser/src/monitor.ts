@@ -361,10 +361,19 @@ async function processMessage(
     !isGroup && dmPolicy !== "allowlist" && (dmPolicy !== "open" || shouldComputeCommandAuth)
       ? await pairing.readAllowFromStore().catch(() => [])
       : [];
+  const senderGroupAllowFrom =
+    configGroupAllowFrom.length > 0 ? configGroupAllowFrom : configAllowFrom;
+  // Route allowlisting already checked the group. Only enforce sender allowlists when configured.
+  const senderGroupPolicy =
+    groupPolicy === "disabled"
+      ? "disabled"
+      : senderGroupAllowFrom.length > 0
+        ? "allowlist"
+        : "open";
   const accessDecision = resolveDmGroupAccessWithLists({
     isGroup,
     dmPolicy,
-    groupPolicy,
+    groupPolicy: senderGroupPolicy,
     allowFrom: configAllowFrom,
     groupAllowFrom: configGroupAllowFrom,
     storeAllowFrom,
