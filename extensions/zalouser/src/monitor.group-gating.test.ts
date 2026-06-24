@@ -358,6 +358,32 @@ describe("zalouser monitor group mention gating", () => {
     ]);
   });
 
+  it("allows allowlisted groups when no sender allowlist is configured", async () => {
+    const { dispatchReplyWithBufferedBlockDispatcher } = installRuntime({
+      commandAuthorized: false,
+    });
+    await __testing.processMessage({
+      message: createGroupMessage({
+        content: "ping @bot",
+        hasAnyMention: true,
+        wasExplicitlyMentioned: true,
+      }),
+      account: {
+        ...createAccount(),
+        config: {
+          groupPolicy: "allowlist",
+          groups: {
+            "g-1": { allow: true },
+          },
+        },
+      },
+      config: createConfig(),
+      runtime: createRuntimeEnv(),
+    });
+
+    expect(dispatchReplyWithBufferedBlockDispatcher).toHaveBeenCalledTimes(1);
+  });
+
   it("blocks group messages when sender is not in groupAllowFrom/allowFrom", async () => {
     const { dispatchReplyWithBufferedBlockDispatcher } = installRuntime({
       commandAuthorized: false,
