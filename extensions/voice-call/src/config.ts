@@ -215,7 +215,7 @@ export const VoiceCallStreamingConfigSchema = z
     /** OpenAI transcription model (default: gpt-4o-transcribe) */
     sttModel: z.string().min(1).default("gpt-4o-transcribe"),
     /** VAD silence duration in ms before considering speech ended */
-    silenceDurationMs: z.number().int().positive().default(800),
+    silenceDurationMs: z.number().int().nonnegative().default(800),
     /** VAD threshold 0-1 (higher = less sensitive) */
     vadThreshold: z.number().min(0).max(1).default(0.5),
     /** WebSocket path for media stream connections */

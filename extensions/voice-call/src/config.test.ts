@@ -190,6 +190,16 @@ describe("normalizeVoiceCallConfig", () => {
     expect(normalized.webhookSecurity.allowedHosts).toEqual([]);
   });
 
+  it("preserves explicit zero-valued streaming silence duration", () => {
+    const normalized = normalizeVoiceCallConfig({
+      streaming: {
+        silenceDurationMs: 0,
+      },
+    });
+
+    expect(normalized.streaming.silenceDurationMs).toBe(0);
+  });
+
   it("accepts partial nested TTS overrides and preserves nested objects", () => {
     const normalized = normalizeVoiceCallConfig({
       tts: {
