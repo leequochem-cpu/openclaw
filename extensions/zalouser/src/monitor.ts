@@ -353,6 +353,8 @@ async function processMessage(
   const dmPolicy = account.config.dmPolicy ?? "pairing";
   const configAllowFrom = (account.config.allowFrom ?? []).map((v) => String(v));
   const configGroupAllowFrom = (account.config.groupAllowFrom ?? []).map((v) => String(v));
+  const groupSenderAllowlistConfigured =
+    configAllowFrom.length > 0 || configGroupAllowFrom.length > 0;
   const shouldComputeCommandAuth = core.channel.commands.shouldComputeCommandAuthorized(
     commandBody,
     config,
@@ -370,7 +372,12 @@ async function processMessage(
     storeAllowFrom,
     isSenderAllowed: (allowFrom) => isSenderAllowed(senderId, allowFrom),
   });
-  if (isGroup && accessDecision.decision !== "allow") {
+  // groupAllowFrom/allowFrom add sender gating; without them, the route allowlist is sufficient.
+  const routeOnlyGroupAllowlist =
+    isGroup &&
+    accessDecision.reasonCode === DM_GROUP_ACCESS_REASON.GROUP_POLICY_EMPTY_ALLOWLIST &&
+    !groupSenderAllowlistConfigured;
+  if (isGroup && accessDecision.decision !== "allow" && !routeOnlyGroupAllowlist) {
     if (accessDecision.reasonCode === DM_GROUP_ACCESS_REASON.GROUP_POLICY_EMPTY_ALLOWLIST) {
       logVerbose(core, runtime, "Blocked zalouser group message (no group allowlist)");
     } else if (accessDecision.reasonCode === DM_GROUP_ACCESS_REASON.GROUP_POLICY_NOT_ALLOWLISTED) {

@@ -28,16 +28,6 @@ export type GatewayPortHealthSnapshot = {
   healthy: boolean;
 };
 
-function hasListenerAttributionGap(portUsage: PortUsage): boolean {
-  if (portUsage.status !== "busy" || portUsage.listeners.length > 0) {
-    return false;
-  }
-  if (portUsage.errors?.length) {
-    return true;
-  }
-  return portUsage.hints.some((hint) => hint.includes("process details are unavailable"));
-}
-
 function listenerOwnedByRuntimePid(params: {
   listener: PortUsage["listeners"][number];
   runtimePid: number;
@@ -141,13 +131,10 @@ export async function inspectGatewayRestart(params: {
       : [];
   const running = runtime.status === "running";
   const runtimePid = runtime.pid;
-  const listenerAttributionGap = hasListenerAttributionGap(portUsage);
   const ownsPort =
     runtimePid != null
-      ? portUsage.listeners.some((listener) =>
-          listenerOwnedByRuntimePid({ listener, runtimePid }),
-        ) || listenerAttributionGap
-      : gatewayListeners.length > 0 || listenerAttributionGap;
+      ? portUsage.listeners.some((listener) => listenerOwnedByRuntimePid({ listener, runtimePid }))
+      : gatewayListeners.length > 0;
   let healthy = running && ownsPort;
   if (!healthy && running && portUsage.status === "busy") {
     try {
