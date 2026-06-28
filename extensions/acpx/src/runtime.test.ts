@@ -1,3 +1,4 @@
+import { readFile, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -329,6 +330,7 @@ describe("AcpxRuntime", () => {
         command: "npx custom-codex-acp",
       },
     });
+    const payloadPaths = new Set<string>();
     try {
       const { runtime, logPath } = await createMockRuntimeFixture({
         mcpServers: {
@@ -361,16 +363,23 @@ describe("AcpxRuntime", () => {
         expect(agentFlagIndex).toBeGreaterThanOrEqual(0);
         const rawAgentCommand = args[agentFlagIndex + 1];
         expect(rawAgentCommand).toContain("mcp-proxy.mjs");
-        const payloadMatch = rawAgentCommand.match(/--payload\s+([A-Za-z0-9_-]+)/);
-        expect(payloadMatch?.[1]).toBeDefined();
-        const payload = JSON.parse(
-          Buffer.from(String(payloadMatch?.[1]), "base64url").toString("utf8"),
-        ) as {
+        expect(rawAgentCommand).not.toContain("CANVA_TOKEN");
+        expect(rawAgentCommand).not.toContain("secret");
+        const payloadMatch = rawAgentCommand.match(/--payload-file\s+(?:"([^"]+)"|(\S+))/);
+        const payloadPath = payloadMatch?.[1] ?? payloadMatch?.[2];
+        expect(payloadPath).toBeDefined();
+        payloadPaths.add(String(payloadPath));
+        const payloadStat = await stat(String(payloadPath));
+        expect(payloadStat.mode & 0o777).toBe(0o600);
+        const payload = JSON.parse(await readFile(String(payloadPath), "utf8")) as {
           targetCommand: string;
         };
         expect(payload.targetCommand).toContain("custom-codex-acp");
       }
     } finally {
+      await Promise.all(
+        Array.from(payloadPaths, (payloadPath) => rm(payloadPath, { force: true })),
+      );
       delete process.env.MOCK_ACPX_CONFIG_SHOW_AGENTS;
     }
   });

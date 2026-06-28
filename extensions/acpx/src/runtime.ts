@@ -122,7 +122,7 @@ export class AcpxRuntime implements AcpRuntime {
   private readonly logger?: PluginLogger;
   private readonly queueOwnerTtlSeconds: number;
   private readonly spawnCommandCache: SpawnCommandCache = {};
-  private readonly mcpProxyAgentCommandCache = new Map<string, string>();
+  private readonly mcpProxyTargetCommandCache = new Map<string, string>();
   private readonly spawnCommandOptions: SpawnCommandOptions;
   private readonly loggedSpawnResolutions = new Set<string>();
 
@@ -656,9 +656,12 @@ export class AcpxRuntime implements AcpRuntime {
       return null;
     }
     const cacheKey = `${params.cwd}::${params.agent}`;
-    const cached = this.mcpProxyAgentCommandCache.get(cacheKey);
+    const cached = this.mcpProxyTargetCommandCache.get(cacheKey);
     if (cached) {
-      return cached;
+      return buildMcpProxyAgentCommand({
+        targetCommand: cached,
+        mcpServers: toAcpMcpServers(this.config.mcpServers),
+      });
     }
     const targetCommand = await resolveAcpxAgentCommand({
       acpxCommand: this.config.command,
@@ -666,12 +669,11 @@ export class AcpxRuntime implements AcpRuntime {
       agent: params.agent,
       spawnOptions: this.spawnCommandOptions,
     });
-    const resolved = buildMcpProxyAgentCommand({
+    this.mcpProxyTargetCommandCache.set(cacheKey, targetCommand);
+    return buildMcpProxyAgentCommand({
       targetCommand,
       mcpServers: toAcpMcpServers(this.config.mcpServers),
     });
-    this.mcpProxyAgentCommandCache.set(cacheKey, resolved);
-    return resolved;
   }
 
   private async runControlCommand(params: {

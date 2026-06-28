@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -51,9 +51,11 @@ rl.on("close", () => process.exit(0));
         ],
       }),
       "utf8",
-    ).toString("base64url");
+    ).toString("utf8");
+    const payloadPath = path.join(path.dirname(echoServerPath), "payload.json");
+    await writeFile(payloadPath, payload, { mode: 0o600 });
 
-    const child = spawn(process.execPath, [proxyPath, "--payload", payload], {
+    const child = spawn(process.execPath, [proxyPath, "--payload-file", payloadPath], {
       stdio: ["pipe", "pipe", "inherit"],
       cwd: process.cwd(),
     });
@@ -94,6 +96,7 @@ rl.on("close", () => process.exit(0));
     });
 
     expect(exitCode).toBe(0);
+    await expect(stat(payloadPath)).rejects.toMatchObject({ code: "ENOENT" });
     const lines = stdout
       .trim()
       .split(/\r?\n/)

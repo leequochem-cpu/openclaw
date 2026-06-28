@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { spawn } from "node:child_process";
+import { readFileSync, unlinkSync } from "node:fs";
 import { createInterface } from "node:readline";
 
 function splitCommandLine(value) {
@@ -59,16 +60,43 @@ function splitCommandLine(value) {
   };
 }
 
+function parsePayload(raw) {
+  const parsed = JSON.parse(raw);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("Invalid MCP proxy payload");
+  }
+  return parsed;
+}
+
+function readPayloadFromFile(filePath) {
+  const raw = readFileSync(filePath, "utf8");
+  try {
+    unlinkSync(filePath);
+  } catch {
+    // Best-effort cleanup; the file is created 0600 and contains short-lived bootstrap data.
+  }
+  return parsePayload(raw);
+}
+
 function decodePayload(argv) {
+  const payloadFileIndex = argv.indexOf("--payload-file");
   const payloadIndex = argv.indexOf("--payload");
-  if (payloadIndex < 0) {
-    throw new Error("Missing --payload");
+  let parsed;
+  if (payloadFileIndex >= 0) {
+    const payloadPath = argv[payloadFileIndex + 1];
+    if (!payloadPath) {
+      throw new Error("Missing MCP proxy payload file value");
+    }
+    parsed = readPayloadFromFile(payloadPath);
+  } else if (payloadIndex >= 0) {
+    const encoded = argv[payloadIndex + 1];
+    if (!encoded) {
+      throw new Error("Missing MCP proxy payload value");
+    }
+    parsed = parsePayload(Buffer.from(encoded, "base64url").toString("utf8"));
+  } else {
+    throw new Error("Missing --payload-file");
   }
-  const encoded = argv[payloadIndex + 1];
-  if (!encoded) {
-    throw new Error("Missing MCP proxy payload value");
-  }
-  const parsed = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
     throw new Error("Invalid MCP proxy payload");
   }
