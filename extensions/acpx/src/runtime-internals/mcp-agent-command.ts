@@ -1,3 +1,6 @@
+import { randomUUID } from "node:crypto";
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnAndCollect, type SpawnCommandOptions } from "./process.js";
@@ -39,6 +42,16 @@ function quoteCommandPart(value: string): string {
 
 function toCommandLine(parts: string[]): string {
   return parts.map(quoteCommandPart).join(" ");
+}
+
+function writeMcpProxyPayloadFile(payload: string): string {
+  const payloadPath = path.join(
+    os.tmpdir(),
+    `openclaw-acpx-mcp-proxy-${process.pid}-${randomUUID()}.json`,
+  );
+  fs.writeFileSync(payloadPath, payload, { encoding: "utf8", mode: 0o600, flag: "wx" });
+  fs.chmodSync(payloadPath, 0o600);
+  return payloadPath;
 }
 
 function readConfiguredAgentOverrides(value: unknown): Record<string, string> {
@@ -102,12 +115,11 @@ export function buildMcpProxyAgentCommand(params: {
   targetCommand: string;
   mcpServers: AcpMcpServer[];
 }): string {
-  const payload = Buffer.from(
+  const payloadPath = writeMcpProxyPayloadFile(
     JSON.stringify({
       targetCommand: params.targetCommand,
       mcpServers: params.mcpServers,
     }),
-    "utf8",
-  ).toString("base64url");
-  return toCommandLine([process.execPath, MCP_PROXY_PATH, "--payload", payload]);
+  );
+  return toCommandLine([process.execPath, MCP_PROXY_PATH, "--payload-file", payloadPath]);
 }
