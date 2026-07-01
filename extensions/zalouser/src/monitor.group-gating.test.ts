@@ -383,6 +383,54 @@ describe("zalouser monitor group mention gating", () => {
     expect(dispatchReplyWithBufferedBlockDispatcher).not.toHaveBeenCalled();
   });
 
+  it("blocks group messages outside groupAllowFrom when groupPolicy is open", async () => {
+    const { dispatchReplyWithBufferedBlockDispatcher } = installRuntime({
+      commandAuthorized: false,
+    });
+    await __testing.processMessage({
+      message: createGroupMessage({
+        content: "ping @bot",
+        hasAnyMention: true,
+        wasExplicitlyMentioned: true,
+      }),
+      account: {
+        ...createAccount(),
+        config: {
+          ...createAccount().config,
+          groupAllowFrom: ["999"],
+        },
+      },
+      config: createConfig(),
+      runtime: createRuntimeEnv(),
+    });
+
+    expect(dispatchReplyWithBufferedBlockDispatcher).not.toHaveBeenCalled();
+  });
+
+  it("blocks group messages outside allowFrom fallback when groupPolicy is open", async () => {
+    const { dispatchReplyWithBufferedBlockDispatcher } = installRuntime({
+      commandAuthorized: false,
+    });
+    await __testing.processMessage({
+      message: createGroupMessage({
+        content: "ping @bot",
+        hasAnyMention: true,
+        wasExplicitlyMentioned: true,
+      }),
+      account: {
+        ...createAccount(),
+        config: {
+          ...createAccount().config,
+          allowFrom: ["999"],
+        },
+      },
+      config: createConfig(),
+      runtime: createRuntimeEnv(),
+    });
+
+    expect(dispatchReplyWithBufferedBlockDispatcher).not.toHaveBeenCalled();
+  });
+
   it("allows group control commands when sender is in groupAllowFrom", async () => {
     const { dispatchReplyWithBufferedBlockDispatcher, resolveCommandAuthorizedFromAuthorizers } =
       installRuntime({
