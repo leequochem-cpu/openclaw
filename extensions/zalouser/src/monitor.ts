@@ -7,6 +7,8 @@ import {
   clearHistoryEntriesIfEnabled,
   recordPendingHistoryEntryIfEnabled,
   resolveDmGroupAccessWithLists,
+  resolveEffectiveAllowFromLists,
+  resolveSenderScopedGroupPolicy,
 } from "openclaw/plugin-sdk/compat";
 import type {
   MarkdownTableMode,
@@ -361,10 +363,20 @@ async function processMessage(
     !isGroup && dmPolicy !== "allowlist" && (dmPolicy !== "open" || shouldComputeCommandAuth)
       ? await pairing.readAllowFromStore().catch(() => [])
       : [];
+  const { effectiveGroupAllowFrom } = resolveEffectiveAllowFromLists({
+    allowFrom: configAllowFrom,
+    groupAllowFrom: configGroupAllowFrom,
+    storeAllowFrom,
+    dmPolicy,
+  });
+  const senderGroupPolicy = resolveSenderScopedGroupPolicy({
+    groupPolicy,
+    groupAllowFrom: effectiveGroupAllowFrom,
+  });
   const accessDecision = resolveDmGroupAccessWithLists({
     isGroup,
     dmPolicy,
-    groupPolicy,
+    groupPolicy: senderGroupPolicy,
     allowFrom: configAllowFrom,
     groupAllowFrom: configGroupAllowFrom,
     storeAllowFrom,
