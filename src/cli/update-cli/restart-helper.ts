@@ -116,21 +116,18 @@ REM Standalone restart script — survives parent process termination.
 REM Wait briefly to ensure file locks are released after update.
 timeout /t 2 /nobreak >nul
 schtasks /End /TN "${taskName}"
-REM Poll for gateway port release before rerun; force-kill listener if stuck.
+REM Poll for gateway port release before rerun. If another process still owns
+REM the port, do not kill it; let the scheduled task report the restart failure.
 set /a attempts=0
 :wait_for_port_release
 set /a attempts+=1
 netstat -ano | findstr /R /C:":${port} .*LISTENING" >nul
 if errorlevel 1 goto port_released
-if %attempts% GEQ 10 goto force_kill_listener
+if %attempts% GEQ 10 goto run_task
 timeout /t 1 /nobreak >nul
 goto wait_for_port_release
-:force_kill_listener
-for /f "tokens=5" %%P in ('netstat -ano ^| findstr /R /C:":${port} .*LISTENING"') do (
-  taskkill /F /PID %%P >nul 2>&1
-  goto port_released
-)
 :port_released
+:run_task
 schtasks /Run /TN "${taskName}"
 REM Self-cleanup
 del "%~f0"

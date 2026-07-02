@@ -28,31 +28,30 @@ describe("restart-helper", () => {
     const pollLabel = ":wait_for_port_release";
     const pollAttemptIncrement = "set /a attempts+=1";
     const pollNetstatCheck = `netstat -ano | findstr /R /C:":${port} .*LISTENING" >nul`;
-    const forceKillLabel = ":force_kill_listener";
-    const forceKillCommand = "taskkill /F /PID %%P >nul 2>&1";
     const portReleasedLabel = ":port_released";
+    const runTaskLabel = ":run_task";
     const runCommand = 'schtasks /Run /TN "';
     const endIndex = content.indexOf(endCommand);
     const attemptsInitIndex = content.indexOf(pollAttemptsInit, endIndex);
     const pollLabelIndex = content.indexOf(pollLabel, attemptsInitIndex);
     const pollAttemptIncrementIndex = content.indexOf(pollAttemptIncrement, pollLabelIndex);
     const pollNetstatCheckIndex = content.indexOf(pollNetstatCheck, pollAttemptIncrementIndex);
-    const forceKillLabelIndex = content.indexOf(forceKillLabel, pollNetstatCheckIndex);
-    const forceKillCommandIndex = content.indexOf(forceKillCommand, forceKillLabelIndex);
-    const portReleasedLabelIndex = content.indexOf(portReleasedLabel, forceKillCommandIndex);
-    const runIndex = content.indexOf(runCommand, portReleasedLabelIndex);
+    const portReleasedLabelIndex = content.indexOf(portReleasedLabel, pollNetstatCheckIndex);
+    const runTaskLabelIndex = content.indexOf(runTaskLabel, portReleasedLabelIndex);
+    const runIndex = content.indexOf(runCommand, runTaskLabelIndex);
 
     expect(endIndex).toBeGreaterThanOrEqual(0);
     expect(attemptsInitIndex).toBeGreaterThan(endIndex);
     expect(pollLabelIndex).toBeGreaterThan(attemptsInitIndex);
     expect(pollAttemptIncrementIndex).toBeGreaterThan(pollLabelIndex);
     expect(pollNetstatCheckIndex).toBeGreaterThan(pollAttemptIncrementIndex);
-    expect(forceKillLabelIndex).toBeGreaterThan(pollNetstatCheckIndex);
-    expect(forceKillCommandIndex).toBeGreaterThan(forceKillLabelIndex);
-    expect(portReleasedLabelIndex).toBeGreaterThan(forceKillCommandIndex);
-    expect(runIndex).toBeGreaterThan(portReleasedLabelIndex);
+    expect(portReleasedLabelIndex).toBeGreaterThan(pollNetstatCheckIndex);
+    expect(runTaskLabelIndex).toBeGreaterThan(portReleasedLabelIndex);
+    expect(runIndex).toBeGreaterThan(runTaskLabelIndex);
 
     expect(content).not.toContain("timeout /t 3 /nobreak >nul");
+    expect(content).not.toContain("taskkill /F");
+    expect(content).not.toContain(":force_kill_listener");
   }
 
   beforeEach(() => {
@@ -156,9 +155,6 @@ describe("restart-helper", () => {
         customPort,
       );
       expect(content).toContain(`netstat -ano | findstr /R /C:":${customPort} .*LISTENING" >nul`);
-      expect(content).toContain(
-        `for /f "tokens=5" %%P in ('netstat -ano ^| findstr /R /C:":${customPort} .*LISTENING"') do (`,
-      );
       expectWindowsRestartWaitOrdering(content, customPort);
       await cleanupScript(scriptPath);
     });

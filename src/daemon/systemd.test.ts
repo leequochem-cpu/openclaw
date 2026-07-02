@@ -11,8 +11,10 @@ vi.mock("node:child_process", () => ({
 import { splitArgsPreservingQuotes } from "./arg-split.js";
 import { parseSystemdExecStart } from "./systemd-unit.js";
 import {
+  installSystemdService,
   isNonFatalSystemdInstallProbeError,
   isSystemdUserServiceAvailable,
+  uninstallSystemdService,
   parseSystemdShow,
   readSystemdServiceExecStart,
   restartSystemdService,
@@ -407,6 +409,72 @@ describe("resolveSystemdUserUnitPath", () => {
     },
   ])("$name", ({ env, expected }) => {
     expect(resolveSystemdUserUnitPath(env)).toBe(expected);
+  });
+});
+
+describe("systemd service install/uninstall", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    execFileMock.mockReset();
+  });
+
+  it("installs the OPENCLAW_SYSTEMD_UNIT override that it writes", async () => {
+    vi.spyOn(fs, "mkdir").mockResolvedValue(undefined);
+    vi.spyOn(fs, "access").mockRejectedValue(
+      Object.assign(new Error("missing"), { code: "ENOENT" }),
+    );
+    const writeFileSpy = vi.spyOn(fs, "writeFile").mockResolvedValue(undefined);
+    execFileMock
+      .mockImplementationOnce((_cmd, args, _opts, cb) => {
+        expect(args).toEqual(["--user", "status"]);
+        cb(null, "", "");
+      })
+      .mockImplementationOnce((_cmd, args, _opts, cb) => {
+        expect(args).toEqual(["--user", "daemon-reload"]);
+        cb(null, "", "");
+      })
+      .mockImplementationOnce((_cmd, args, _opts, cb) => {
+        expect(args).toEqual(["--user", "enable", "openclaw-node.service"]);
+        cb(null, "", "");
+      })
+      .mockImplementationOnce((_cmd, args, _opts, cb) => {
+        expect(args).toEqual(["--user", "restart", "openclaw-node.service"]);
+        cb(null, "", "");
+      });
+
+    const { stdout } = createWritableStreamMock();
+    const result = await installSystemdService({
+      env: { HOME: "/home/test", OPENCLAW_SYSTEMD_UNIT: "openclaw-node" },
+      stdout,
+      programArguments: ["/usr/bin/openclaw", "node", "daemon"],
+      environment: {},
+    });
+
+    expect(result.unitPath).toBe("/home/test/.config/systemd/user/openclaw-node.service");
+    expect(pathLikeToString(writeFileSpy.mock.calls[0]?.[0])).toBe(result.unitPath);
+  });
+
+  it("uninstalls the OPENCLAW_SYSTEMD_UNIT override that it removes", async () => {
+    const unlinkSpy = vi.spyOn(fs, "unlink").mockResolvedValue(undefined);
+    execFileMock
+      .mockImplementationOnce((_cmd, args, _opts, cb) => {
+        expect(args).toEqual(["--user", "status"]);
+        cb(null, "", "");
+      })
+      .mockImplementationOnce((_cmd, args, _opts, cb) => {
+        expect(args).toEqual(["--user", "disable", "--now", "openclaw-node.service"]);
+        cb(null, "", "");
+      });
+
+    const { stdout } = createWritableStreamMock();
+    await uninstallSystemdService({
+      env: { HOME: "/home/test", OPENCLAW_SYSTEMD_UNIT: "openclaw-node.service" },
+      stdout,
+    });
+
+    expect(pathLikeToString(unlinkSpy.mock.calls[0]?.[0])).toBe(
+      "/home/test/.config/systemd/user/openclaw-node.service",
+    );
   });
 });
 
