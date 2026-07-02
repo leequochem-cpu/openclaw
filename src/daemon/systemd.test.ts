@@ -420,7 +420,9 @@ describe("systemd service install/uninstall", () => {
 
   it("installs the OPENCLAW_SYSTEMD_UNIT override that it writes", async () => {
     vi.spyOn(fs, "mkdir").mockResolvedValue(undefined);
-    vi.spyOn(fs, "access").mockRejectedValue(Object.assign(new Error("missing"), { code: "ENOENT" }));
+    vi.spyOn(fs, "access").mockRejectedValue(
+      Object.assign(new Error("missing"), { code: "ENOENT" }),
+    );
     const writeFileSpy = vi.spyOn(fs, "writeFile").mockResolvedValue(undefined);
     execFileMock
       .mockImplementationOnce((_cmd, args, _opts, cb) => {
