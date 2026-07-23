@@ -33,7 +33,6 @@ import {
   resolveDefaultZalouserAccountId,
   resolveZalouserAccountSync,
   getZcaUserInfo,
-  checkZcaAuthenticated,
   type ResolvedZalouserAccount,
 } from "./accounts.js";
 import { ZalouserConfigSchema } from "./config-schema.js";
@@ -52,6 +51,7 @@ import {
   startZaloQrLogin,
   waitForZaloQrLogin,
   getZaloUserInfo,
+  zalouserSessionExists,
 } from "./zalo-js.js";
 
 const meta = {
@@ -359,7 +359,8 @@ export const zalouserPlugin: ChannelPlugin<ResolvedZalouserAccount> = {
           "messagePrefix",
         ],
       }),
-    isConfigured: async (account) => await checkZcaAuthenticated(account.profile),
+    // Configuration is local session state; network auth is retried by the channel supervisor.
+    isConfigured: (account) => zalouserSessionExists(account.profile),
     describeAccount: (account): ChannelAccountSnapshot => ({
       accountId: account.accountId,
       name: account.name,
