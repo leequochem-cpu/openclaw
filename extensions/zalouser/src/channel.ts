@@ -33,6 +33,7 @@ import {
   resolveDefaultZalouserAccountId,
   resolveZalouserAccountSync,
   getZcaUserInfo,
+  checkZcaAuthenticated,
   type ResolvedZalouserAccount,
 } from "./accounts.js";
 import { ZalouserConfigSchema } from "./config-schema.js";

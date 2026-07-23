@@ -55,13 +55,16 @@ describe("zalouser channel policies", () => {
     }
 
     expect(
-      isConfigured({
-        accountId: "default",
-        profile: "personal",
-        enabled: true,
-        authenticated: false,
-        config: {},
-      }),
+      isConfigured(
+        {
+          accountId: "default",
+          profile: "personal",
+          enabled: true,
+          authenticated: false,
+          config: {},
+        },
+        {},
+      ),
     ).toBe(true);
     expect(mockSessionExists).toHaveBeenCalledWith("personal");
   });
