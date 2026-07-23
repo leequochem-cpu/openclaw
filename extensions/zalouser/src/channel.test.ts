@@ -45,7 +45,7 @@ describe("zalouser channel policies", () => {
     mockSessionExists.mockReset();
   });
 
-  it("treats a saved session as configured without requiring network access", async () => {
+  it("treats a saved session as configured without requiring network access", () => {
     mockSessionExists.mockReturnValue(true);
 
     const isConfigured = zalouserPlugin.config.isConfigured;
@@ -54,7 +54,7 @@ describe("zalouser channel policies", () => {
       return;
     }
 
-    await expect(
+    expect(
       isConfigured({
         accountId: "default",
         profile: "personal",
@@ -62,7 +62,7 @@ describe("zalouser channel policies", () => {
         authenticated: false,
         config: {},
       }),
-    ).resolves.toBe(true);
+    ).toBe(true);
     expect(mockSessionExists).toHaveBeenCalledWith("personal");
   });
 
