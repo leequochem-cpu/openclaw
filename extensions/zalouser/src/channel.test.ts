@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { zalouserPlugin } from "./channel.js";
 import { sendReactionZalouser } from "./send.js";
+import { zalouserSessionExists } from "./zalo-js.js";
 
 vi.mock("./send.js", async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
@@ -10,7 +11,16 @@ vi.mock("./send.js", async (importOriginal) => {
   };
 });
 
+vi.mock("./zalo-js.js", async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>;
+  return {
+    ...actual,
+    zalouserSessionExists: vi.fn(),
+  };
+});
+
 const mockSendReaction = vi.mocked(sendReactionZalouser);
+const mockSessionExists = vi.mocked(zalouserSessionExists);
 
 describe("zalouser outbound chunker", () => {
   it("chunks without empty strings and respects limit", () => {
@@ -32,6 +42,31 @@ describe("zalouser channel policies", () => {
   beforeEach(() => {
     mockSendReaction.mockClear();
     mockSendReaction.mockResolvedValue({ ok: true });
+    mockSessionExists.mockReset();
+  });
+
+  it("treats a saved session as configured without requiring network access", () => {
+    mockSessionExists.mockReturnValue(true);
+
+    const isConfigured = zalouserPlugin.config.isConfigured;
+    expect(isConfigured).toBeTypeOf("function");
+    if (!isConfigured) {
+      return;
+    }
+
+    expect(
+      isConfigured(
+        {
+          accountId: "default",
+          profile: "personal",
+          enabled: true,
+          authenticated: false,
+          config: {},
+        },
+        {},
+      ),
+    ).toBe(true);
+    expect(mockSessionExists).toHaveBeenCalledWith("personal");
   });
 
   it("resolves requireMention from group config", () => {
