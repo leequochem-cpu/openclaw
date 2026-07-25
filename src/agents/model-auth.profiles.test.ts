@@ -397,4 +397,67 @@ describe("getApiKeyForModel", () => {
       },
     );
   });
+
+  it("rejects explicit profileId when the profile belongs to another provider", async () => {
+    await expect(
+      resolveApiKeyForProvider({
+        provider: "google",
+        profileId: "anthropic:default",
+        store: {
+          version: 1,
+          profiles: {
+            "anthropic:default": {
+              type: "api_key",
+              provider: "anthropic",
+              key: "sk-ant-leaked", // pragma: allowlist secret
+            },
+          },
+        },
+      }),
+    ).rejects.toThrow('Auth profile "anthropic:default" is for anthropic, not google.');
+  });
+
+  it("resolves matching explicit profileId for the requested provider", async () => {
+    const resolved = await resolveApiKeyForProvider({
+      provider: "google",
+      profileId: "google:default",
+      store: {
+        version: 1,
+        profiles: {
+          "google:default": {
+            type: "api_key",
+            provider: "google",
+            key: "google-test-key", // pragma: allowlist secret
+          },
+          "anthropic:default": {
+            type: "api_key",
+            provider: "anthropic",
+            key: "sk-ant-other", // pragma: allowlist secret
+          },
+        },
+      },
+    });
+    expect(resolved.apiKey).toBe("google-test-key");
+    expect(resolved.profileId).toBe("google:default");
+    expect(resolved.source).toBe("profile:google:default");
+  });
+
+  it("allows auth-compatible coding-plan providers to share base profiles", async () => {
+    const resolved = await resolveApiKeyForProvider({
+      provider: "volcengine-plan",
+      profileId: "volcengine:default",
+      store: {
+        version: 1,
+        profiles: {
+          "volcengine:default": {
+            type: "api_key",
+            provider: "volcengine",
+            key: "volcengine-test-key", // pragma: allowlist secret
+          },
+        },
+      },
+    });
+    expect(resolved.apiKey).toBe("volcengine-test-key");
+    expect(resolved.profileId).toBe("volcengine:default");
+  });
 });

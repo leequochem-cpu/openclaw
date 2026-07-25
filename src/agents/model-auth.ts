@@ -18,7 +18,7 @@ import {
 } from "./auth-profiles.js";
 import { PROVIDER_ENV_API_KEY_CANDIDATES } from "./model-auth-env-vars.js";
 import { OLLAMA_LOCAL_AUTH_MARKER } from "./model-auth-markers.js";
-import { normalizeProviderId } from "./model-selection.js";
+import { normalizeProviderId, normalizeProviderIdForAuth } from "./model-selection.js";
 
 export { ensureAuthProfileStore, resolveAuthProfileOrder } from "./auth-profiles.js";
 
@@ -175,6 +175,15 @@ export async function resolveApiKeyForProvider(params: {
   const store = params.store ?? ensureAuthProfileStore(params.agentDir);
 
   if (profileId) {
+    const profile = store.profiles[profileId];
+    if (!profile) {
+      throw new Error(`No credentials found for profile "${profileId}".`);
+    }
+    // Refuse cross-provider profile locks so media/tools cannot send one
+    // provider's credentials to a different provider endpoint.
+    if (normalizeProviderIdForAuth(profile.provider) !== normalizeProviderIdForAuth(provider)) {
+      throw new Error(`Auth profile "${profileId}" is for ${profile.provider}, not ${provider}.`);
+    }
     const resolved = await resolveApiKeyForProfile({
       cfg,
       store,
@@ -184,7 +193,7 @@ export async function resolveApiKeyForProvider(params: {
     if (!resolved) {
       throw new Error(`No credentials found for profile "${profileId}".`);
     }
-    const mode = store.profiles[profileId]?.type;
+    const mode = profile.type;
     return {
       apiKey: resolved.apiKey,
       profileId,
