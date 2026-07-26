@@ -22,9 +22,9 @@ export type ResetOptions = {
   dryRun?: boolean;
 };
 
-async function stopGatewayIfRunning(runtime: RuntimeEnv) {
+async function stopGatewayIfRunning(runtime: RuntimeEnv): Promise<boolean> {
   if (isNixMode) {
-    return;
+    return true;
   }
   const service = resolveGatewayService();
   let loaded = false;
@@ -32,16 +32,27 @@ async function stopGatewayIfRunning(runtime: RuntimeEnv) {
     loaded = await service.isLoaded({ env: process.env });
   } catch (err) {
     runtime.error(`Gateway service check failed: ${String(err)}`);
-    return;
+    return false;
   }
   if (!loaded) {
-    return;
+    return true;
   }
   try {
     await service.stop({ env: process.env, stdout: process.stdout });
   } catch (err) {
     runtime.error(`Gateway stop failed: ${String(err)}`);
+    let stillLoaded = true;
+    try {
+      stillLoaded = await service.isLoaded({ env: process.env });
+    } catch {
+      stillLoaded = true;
+    }
+    if (stillLoaded) {
+      runtime.error("Gateway service still loaded after stop failure; refusing to continue reset.");
+      return false;
+    }
   }
+  return true;
 }
 
 export async function resetCommand(runtime: RuntimeEnv, opts: ResetOptions) {
@@ -113,7 +124,12 @@ export async function resetCommand(runtime: RuntimeEnv, opts: ResetOptions) {
     if (dryRun) {
       runtime.log("[dry-run] stop gateway service");
     } else {
-      await stopGatewayIfRunning(runtime);
+      const stopped = await stopGatewayIfRunning(runtime);
+      if (!stopped) {
+        runtime.error("Aborting reset because the gateway service could not be stopped.");
+        runtime.exit(1);
+        return;
+      }
     }
   }
 

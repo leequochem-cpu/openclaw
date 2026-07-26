@@ -131,8 +131,21 @@ export async function runServiceUninstall(params: {
   if (loaded && params.stopBeforeUninstall) {
     try {
       await params.service.stop({ env: process.env, stdout });
-    } catch {
-      // Best-effort stop; final loaded check gates success when enabled.
+    } catch (err) {
+      // When we require the service to be unloaded after uninstall, a failed
+      // stop must not proceed to delete unit/plist/scripts under a live process.
+      if (params.assertNotLoadedAfterUninstall) {
+        let stillLoaded = true;
+        try {
+          stillLoaded = await params.service.isLoaded({ env: process.env });
+        } catch {
+          stillLoaded = true;
+        }
+        if (stillLoaded) {
+          fail(`${params.serviceNoun} stop failed: ${String(err)}`);
+          return;
+        }
+      }
     }
   }
   try {
