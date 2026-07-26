@@ -286,6 +286,15 @@ export async function uninstallLegacyLaunchAgents({
   return agents;
 }
 
+function isLaunchctlNotLoaded(res: { stdout: string; stderr: string; code: number }): boolean {
+  const detail = (res.stderr || res.stdout).toLowerCase();
+  return (
+    detail.includes("no such process") ||
+    detail.includes("could not find service") ||
+    detail.includes("not found")
+  );
+}
+
 export async function uninstallLaunchAgent({
   env,
   stdout,
@@ -293,7 +302,11 @@ export async function uninstallLaunchAgent({
   const domain = resolveGuiDomain();
   const label = resolveLaunchAgentLabel({ env });
   const plistPath = resolveLaunchAgentPlistPath(env);
-  await execLaunchctl(["bootout", domain, plistPath]);
+  const bootout = await execLaunchctl(["bootout", domain, plistPath]);
+  if (bootout.code !== 0 && !isLaunchctlNotLoaded(bootout)) {
+    throw new Error(`launchctl bootout failed: ${bootout.stderr || bootout.stdout}`.trim());
+  }
+  // Legacy launchd fallback; ignore failures after a successful/no-op bootout.
   await execLaunchctl(["unload", plistPath]);
 
   try {
@@ -313,15 +326,6 @@ export async function uninstallLaunchAgent({
   } catch {
     stdout.write(`LaunchAgent remains at ${plistPath} (could not move)\n`);
   }
-}
-
-function isLaunchctlNotLoaded(res: { stdout: string; stderr: string; code: number }): boolean {
-  const detail = (res.stderr || res.stdout).toLowerCase();
-  return (
-    detail.includes("no such process") ||
-    detail.includes("could not find service") ||
-    detail.includes("not found")
-  );
 }
 
 function isUnsupportedGuiDomain(detail: string): boolean {

@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import os from "node:os";
+import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const execFileMock = vi.hoisted(() => vi.fn());
@@ -18,6 +19,7 @@ import {
   restartSystemdService,
   resolveSystemdUserUnitPath,
   stopSystemdService,
+  uninstallSystemdService,
 } from "./systemd.js";
 
 type ExecFileError = Error & {
@@ -773,5 +775,51 @@ describe("systemd service control", () => {
         cb(null, "", "");
       });
     await assertRestartSuccess({ USER: "debian" });
+  });
+
+  it("refuses to delete the unit file when disable --now fails", async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-systemd-uninstall-"));
+    const unitPath = path.join(tmpDir, ".config", "systemd", "user", "openclaw-gateway.service");
+    await fs.mkdir(path.dirname(unitPath), { recursive: true });
+    await fs.writeFile(unitPath, "[Unit]\nDescription=test\n", "utf8");
+
+    execFileMock
+      .mockImplementationOnce((_cmd, _args, _opts, cb) => cb(null, "", ""))
+      .mockImplementationOnce((_cmd, args, _opts, cb) => {
+        expect(args).toEqual(["--user", "disable", "--now", "openclaw-gateway.service"]);
+        const err = createExecFileError("disable failed", { stderr: "Access denied" });
+        cb(err, "", "Access denied");
+      });
+
+    await expect(
+      uninstallSystemdService({
+        stdout: { write: vi.fn() } as unknown as NodeJS.WritableStream,
+        env: { HOME: tmpDir },
+      }),
+    ).rejects.toThrow("systemctl disable --now failed: Access denied");
+
+    await expect(fs.access(unitPath)).resolves.toBeUndefined();
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it("allows uninstall cleanup when the unit is already missing", async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-systemd-uninstall-missing-"));
+    execFileMock
+      .mockImplementationOnce((_cmd, _args, _opts, cb) => cb(null, "", ""))
+      .mockImplementationOnce((_cmd, args, _opts, cb) => {
+        expect(args).toEqual(["--user", "disable", "--now", "openclaw-gateway.service"]);
+        const err = createExecFileError("not found", {
+          stderr: "Failed to disable unit: Unit file openclaw-gateway.service does not exist.",
+        });
+        cb(err, "", "Failed to disable unit: Unit file openclaw-gateway.service does not exist.");
+      });
+
+    const write = vi.fn();
+    await uninstallSystemdService({
+      stdout: { write } as unknown as NodeJS.WritableStream,
+      env: { HOME: tmpDir },
+    });
+    expect(String(write.mock.calls.at(-1)?.[0] ?? "")).toContain("Systemd service not found");
+    await fs.rm(tmpDir, { recursive: true, force: true });
   });
 });

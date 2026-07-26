@@ -3,19 +3,33 @@ import os from "node:os";
 import path from "node:path";
 import { PassThrough } from "node:stream";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { installScheduledTask, readScheduledTaskCommand } from "./schtasks.js";
+import {
+  installScheduledTask,
+  readScheduledTaskCommand,
+  uninstallScheduledTask,
+} from "./schtasks.js";
 
 const schtasksCalls: string[][] = [];
+let schtasksHandler: (argv: string[]) => {
+  code: number;
+  stdout: string;
+  stderr: string;
+} = () => ({
+  code: 0,
+  stdout: "",
+  stderr: "",
+});
 
 vi.mock("./schtasks-exec.js", () => ({
   execSchtasks: async (argv: string[]) => {
     schtasksCalls.push(argv);
-    return { code: 0, stdout: "", stderr: "" };
+    return schtasksHandler(argv);
   },
 }));
 
 beforeEach(() => {
   schtasksCalls.length = 0;
+  schtasksHandler = () => ({ code: 0, stdout: "", stderr: "" });
 });
 
 describe("installScheduledTask", () => {
@@ -150,5 +164,35 @@ describe("installScheduledTask", () => {
       expect(script).not.toContain('set "PATH=');
       expect(script).toContain('set "OPENCLAW_GATEWAY_PORT=18789"');
     });
+  });
+});
+
+describe("uninstallScheduledTask", () => {
+  it("refuses to delete the task script when schtasks delete fails", async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-schtasks-uninstall-"));
+    const env = {
+      USERPROFILE: tmpDir,
+      OPENCLAW_PROFILE: "default",
+    };
+    const scriptPath = path.join(tmpDir, ".openclaw", "gateway.cmd");
+    await fs.mkdir(path.dirname(scriptPath), { recursive: true });
+    await fs.writeFile(scriptPath, "@echo off\n", "utf8");
+
+    schtasksHandler = (argv) => {
+      if (argv[0] === "/Query") {
+        return { code: 0, stdout: "", stderr: "" };
+      }
+      return { code: 1, stdout: "", stderr: "Access is denied." };
+    };
+
+    await expect(
+      uninstallScheduledTask({
+        env,
+        stdout: new PassThrough(),
+      }),
+    ).rejects.toThrow("schtasks delete failed: Access is denied.");
+
+    await expect(fs.access(scriptPath)).resolves.toBeUndefined();
+    await fs.rm(tmpDir, { recursive: true, force: true });
   });
 });

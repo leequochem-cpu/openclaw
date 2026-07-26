@@ -520,6 +520,16 @@ export async function installSystemdService({
   return { unitPath };
 }
 
+function isSystemdUnitMissing(detail: string): boolean {
+  const normalized = detail.toLowerCase();
+  return (
+    normalized.includes("not found") ||
+    normalized.includes("could not be found") ||
+    normalized.includes("does not exist") ||
+    normalized.includes("no such file")
+  );
+}
+
 export async function uninstallSystemdService({
   env,
   stdout,
@@ -527,7 +537,15 @@ export async function uninstallSystemdService({
   await assertSystemdAvailable(env);
   const serviceName = resolveGatewaySystemdServiceName(env.OPENCLAW_PROFILE);
   const unitName = `${serviceName}.service`;
-  await execSystemctlUser(env, ["disable", "--now", unitName]);
+  const disable = await execSystemctlUser(env, ["disable", "--now", unitName]);
+  if (disable.code !== 0) {
+    const detail = readSystemctlDetail(disable);
+    // Missing units are fine (idempotent cleanup), but other failures must not
+    // proceed to delete the unit file while the gateway may still be running.
+    if (!isSystemdUnitMissing(detail)) {
+      throw new Error(`systemctl disable --now failed: ${detail || "unknown error"}`.trim());
+    }
+  }
 
   const unitPath = resolveSystemdUnitPath(env);
   try {

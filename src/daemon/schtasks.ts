@@ -287,7 +287,21 @@ export async function uninstallScheduledTask({
 }: GatewayServiceManageArgs): Promise<void> {
   await assertSchtasksAvailable();
   const taskName = resolveTaskName(env);
-  await execSchtasks(["/Delete", "/F", "/TN", taskName]);
+  const deleted = await execSchtasks(["/Delete", "/F", "/TN", taskName]);
+  if (deleted.code !== 0) {
+    const detail = (deleted.stderr || deleted.stdout).trim();
+    const normalized = detail.toLowerCase();
+    const missing =
+      normalized.includes("cannot find the file") ||
+      normalized.includes("cannot find") ||
+      normalized.includes("not found") ||
+      normalized.includes("does not exist");
+    // Missing tasks are fine for idempotent cleanup; other failures must not
+    // proceed to delete the task script while the gateway may still be running.
+    if (!missing) {
+      throw new Error(`schtasks delete failed: ${detail || "unknown error"}`.trim());
+    }
+  }
 
   const scriptPath = resolveTaskScriptPath(env);
   try {

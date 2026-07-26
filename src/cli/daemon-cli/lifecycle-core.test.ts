@@ -41,10 +41,12 @@ vi.mock("../../runtime.js", () => ({
 
 let runServiceRestart: typeof import("./lifecycle-core.js").runServiceRestart;
 let runServiceStop: typeof import("./lifecycle-core.js").runServiceStop;
+let runServiceUninstall: typeof import("./lifecycle-core.js").runServiceUninstall;
 
 describe("runServiceRestart token drift", () => {
   beforeAll(async () => {
-    ({ runServiceRestart, runServiceStop } = await import("./lifecycle-core.js"));
+    ({ runServiceRestart, runServiceStop, runServiceUninstall } =
+      await import("./lifecycle-core.js"));
   });
 
   beforeEach(() => {
@@ -175,5 +177,32 @@ describe("runServiceRestart token drift", () => {
     const payload = JSON.parse(jsonLine ?? "{}") as { result?: string; message?: string };
     expect(payload.result).toBe("restarted");
     expect(payload.message).toContain("unmanaged process");
+  });
+});
+
+describe("runServiceUninstall stop failure", () => {
+  beforeEach(() => {
+    runtimeLogs.length = 0;
+    defaultRuntime.error.mockClear();
+    service.isLoaded.mockReset();
+    service.stop.mockReset();
+    service.uninstall.mockReset();
+  });
+
+  it("does not uninstall when stop fails and the service remains loaded", async () => {
+    service.isLoaded.mockResolvedValue(true);
+    service.stop.mockRejectedValue(new Error("stop denied"));
+
+    await expect(
+      runServiceUninstall({
+        serviceNoun: "Gateway",
+        service,
+        opts: { json: true },
+        stopBeforeUninstall: true,
+        assertNotLoadedAfterUninstall: true,
+      }),
+    ).rejects.toThrow("__exit__:1");
+
+    expect(service.uninstall).not.toHaveBeenCalled();
   });
 });

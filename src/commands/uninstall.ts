@@ -51,6 +51,16 @@ function buildScopeSelection(opts: UninstallOptions): {
   return { scopes, hadExplicit };
 }
 
+async function isServiceStillLoaded(): Promise<boolean> {
+  const service = resolveGatewayService();
+  try {
+    return await service.isLoaded({ env: process.env });
+  } catch {
+    // Fail closed: if we cannot prove the service is gone, treat it as loaded.
+    return true;
+  }
+}
+
 async function stopAndUninstallService(runtime: RuntimeEnv): Promise<boolean> {
   if (isNixMode) {
     runtime.error("Nix mode detected; service uninstall is disabled.");
@@ -72,14 +82,24 @@ async function stopAndUninstallService(runtime: RuntimeEnv): Promise<boolean> {
     await service.stop({ env: process.env, stdout: process.stdout });
   } catch (err) {
     runtime.error(`Gateway stop failed: ${String(err)}`);
+    if (await isServiceStillLoaded()) {
+      runtime.error(
+        "Gateway service still loaded after stop failure; refusing to continue uninstall.",
+      );
+      return false;
+    }
   }
   try {
     await service.uninstall({ env: process.env, stdout: process.stdout });
-    return true;
   } catch (err) {
     runtime.error(`Gateway uninstall failed: ${String(err)}`);
     return false;
   }
+  if (await isServiceStillLoaded()) {
+    runtime.error("Gateway service still loaded after uninstall; refusing to continue.");
+    return false;
+  }
+  return true;
 }
 
 async function removeMacApp(runtime: RuntimeEnv, dryRun?: boolean) {
@@ -159,7 +179,18 @@ export async function uninstallCommand(runtime: RuntimeEnv, opts: UninstallOptio
     if (dryRun) {
       runtime.log("[dry-run] remove gateway service");
     } else {
-      await stopAndUninstallService(runtime);
+      const serviceRemoved = await stopAndUninstallService(runtime);
+      if (!serviceRemoved && (scopes.has("state") || scopes.has("workspace"))) {
+        runtime.error(
+          "Aborting state/workspace removal because the gateway service could not be stopped/uninstalled.",
+        );
+        runtime.exit(1);
+        return;
+      }
+      if (!serviceRemoved) {
+        runtime.exit(1);
+        return;
+      }
     }
   }
 
