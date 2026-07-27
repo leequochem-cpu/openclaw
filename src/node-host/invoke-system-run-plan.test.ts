@@ -175,4 +175,64 @@ describe("hardenApprovedExecutionPaths", () => {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
   });
+
+  it("binds interpreter scripts that follow runtime flags", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-approval-interpreter-flags-"));
+    const scriptPath = path.join(tmp, "run.py");
+    fs.writeFileSync(scriptPath, "print('SAFE')\n");
+    try {
+      const prepared = buildSystemRunApprovalPlan({
+        command: ["python3", "-O", "./run.py"],
+        cwd: tmp,
+      });
+      expect(prepared.ok).toBe(true);
+      if (!prepared.ok) {
+        throw new Error("unreachable");
+      }
+      expect(prepared.plan.mutableFileOperand).toEqual({
+        argvIndex: 2,
+        path: fs.realpathSync(scriptPath),
+        sha256: expect.any(String),
+      });
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("binds node scripts after require preload flags", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-approval-node-require-"));
+    const scriptPath = path.join(tmp, "run.js");
+    const preloadPath = path.join(tmp, "preload.js");
+    fs.writeFileSync(scriptPath, 'console.log("SAFE");\n');
+    fs.writeFileSync(preloadPath, "\n");
+    try {
+      const prepared = buildSystemRunApprovalPlan({
+        command: ["node", "-r", "./preload.js", "./run.js"],
+        cwd: tmp,
+      });
+      expect(prepared.ok).toBe(true);
+      if (!prepared.ok) {
+        throw new Error("unreachable");
+      }
+      expect(prepared.plan.mutableFileOperand).toEqual({
+        argvIndex: 3,
+        path: fs.realpathSync(scriptPath),
+        sha256: expect.any(String),
+      });
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("does not bind inline interpreter eval modes as mutable file operands", () => {
+    const prepared = buildSystemRunApprovalPlan({
+      command: ["python3", "-c", "print(1)"],
+      cwd: process.cwd(),
+    });
+    expect(prepared.ok).toBe(true);
+    if (!prepared.ok) {
+      throw new Error("unreachable");
+    }
+    expect(prepared.plan.mutableFileOperand).toBeUndefined();
+  });
 });

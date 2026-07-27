@@ -753,6 +753,43 @@ describe("handleSystemRunInvoke mac app exec host routing", () => {
     }
   });
 
+  it("denies approval-based execution when an interpreter-flagged script changes after approval", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-approval-interpreter-drift-"));
+    const scriptPath = path.join(tmp, "run.py");
+    fs.writeFileSync(scriptPath, "print('SAFE')\n");
+    try {
+      const prepared = buildSystemRunApprovalPlan({
+        command: ["python3", "-O", "./run.py"],
+        cwd: tmp,
+      });
+      expect(prepared.ok).toBe(true);
+      if (!prepared.ok) {
+        throw new Error("unreachable");
+      }
+      expect(prepared.plan.mutableFileOperand?.argvIndex).toBe(2);
+
+      fs.writeFileSync(scriptPath, "print('PWNED')\n");
+      const { runCommand, sendInvokeResult } = await runSystemInvoke({
+        preferMacAppExecHost: false,
+        command: prepared.plan.argv,
+        rawCommand: prepared.plan.rawCommand,
+        systemRunPlan: prepared.plan,
+        cwd: prepared.plan.cwd ?? tmp,
+        approved: true,
+        security: "full",
+        ask: "off",
+      });
+
+      expect(runCommand).not.toHaveBeenCalled();
+      expectInvokeErrorMessage(sendInvokeResult, {
+        message: "SYSTEM_RUN_DENIED: approval script operand changed before execution",
+        exact: true,
+      });
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it("keeps approved shell script execution working when the script is unchanged", async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-approval-script-stable-"));
     const fixture = createMutableScriptOperandFixture(tmp);
