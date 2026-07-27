@@ -24,14 +24,6 @@ export type ApprovedCwdSnapshot = {
   stat: fs.Stats;
 };
 
-const MUTABLE_ARGV1_INTERPRETER_PATTERNS = [
-  /^(?:node|nodejs)$/,
-  /^perl$/,
-  /^php$/,
-  /^python(?:\d+(?:\.\d+)*)?$/,
-  /^ruby$/,
-] as const;
-
 function normalizeString(value: unknown): string | null {
   if (typeof value !== "string") {
     return null;
@@ -146,6 +138,139 @@ function resolvePosixShellScriptOperandIndex(argv: string[]): number | null {
   return null;
 }
 
+type InterpreterFamily = "node" | "perl" | "php" | "python" | "ruby";
+
+function resolveInterpreterFamily(executable: string): InterpreterFamily | null {
+  if (/^(?:node|nodejs)$/.test(executable)) {
+    return "node";
+  }
+  if (/^perl$/.test(executable)) {
+    return "perl";
+  }
+  if (/^php$/.test(executable)) {
+    return "php";
+  }
+  if (/^python(?:\d+(?:\.\d+)*)?$/.test(executable)) {
+    return "python";
+  }
+  if (/^ruby$/.test(executable)) {
+    return "ruby";
+  }
+  return null;
+}
+
+function splitInterpreterFlag(token: string): { flag: string; hasInlineValue: boolean } {
+  const eq = token.indexOf("=");
+  if (eq <= 0) {
+    return { flag: token, hasInlineValue: false };
+  }
+  return { flag: token.slice(0, eq), hasInlineValue: true };
+}
+
+function isInterpreterNoFileFlag(family: InterpreterFamily, flag: string): boolean {
+  switch (family) {
+    case "python":
+      return flag === "-c" || flag === "-m";
+    case "node":
+      return (
+        flag === "-e" ||
+        flag === "--eval" ||
+        flag === "-p" ||
+        flag === "--print" ||
+        flag === "--input-type"
+      );
+    case "ruby":
+      return flag === "-e";
+    case "perl":
+      return flag === "-e" || flag === "-E";
+    case "php":
+      return flag === "-r" || flag === "-R" || flag === "-B" || flag === "-E";
+    default:
+      return false;
+  }
+}
+
+function isInterpreterValueFlag(family: InterpreterFamily, flag: string): boolean {
+  switch (family) {
+    case "python":
+      return (
+        flag === "-c" ||
+        flag === "-m" ||
+        flag === "-W" ||
+        flag === "-X" ||
+        flag === "--check-hash-based-pycs"
+      );
+    case "node":
+      return (
+        flag === "-e" ||
+        flag === "--eval" ||
+        flag === "-p" ||
+        flag === "--print" ||
+        flag === "-r" ||
+        flag === "--require" ||
+        flag === "--import" ||
+        flag === "--loader" ||
+        flag === "--experimental-loader" ||
+        flag === "--input-type"
+      );
+    case "ruby":
+      return flag === "-e" || flag === "-r" || flag === "-I" || flag === "-W";
+    case "perl":
+      return flag === "-e" || flag === "-E" || flag === "-I" || flag === "-F" || flag === "-i";
+    case "php":
+      return flag === "-r" || flag === "-d" || flag === "-f";
+    default:
+      return false;
+  }
+}
+
+function isInterpreterScriptValueFlag(family: InterpreterFamily, flag: string): boolean {
+  return family === "php" && flag === "-f";
+}
+
+function resolveMutableInterpreterScriptOperandIndex(
+  argv: string[],
+  family: InterpreterFamily,
+): number | null {
+  let afterDoubleDash = false;
+  for (let i = 1; i < argv.length; i += 1) {
+    const token = argv[i]?.trim() ?? "";
+    if (!token) {
+      continue;
+    }
+    if (token === "-") {
+      return null;
+    }
+    if (!afterDoubleDash && token === "--") {
+      afterDoubleDash = true;
+      continue;
+    }
+    if (!afterDoubleDash && token.startsWith("-")) {
+      const { flag, hasInlineValue } = splitInterpreterFlag(token);
+      if (isInterpreterNoFileFlag(family, flag)) {
+        return null;
+      }
+      if (isInterpreterScriptValueFlag(family, flag)) {
+        if (hasInlineValue) {
+          return null;
+        }
+        const scriptIndex = i + 1;
+        const script = argv[scriptIndex]?.trim() ?? "";
+        return script && script !== "-" ? scriptIndex : null;
+      }
+      if (!hasInlineValue && isInterpreterValueFlag(family, flag)) {
+        const next = argv[i + 1]?.trim() ?? "";
+        if (next && !next.startsWith("-")) {
+          i += 1;
+        }
+      }
+      continue;
+    }
+    return i;
+  }
+  return null;
+}
+
 function resolveMutableFileOperandIndex(argv: string[]): number | null {
   const unwrapped = unwrapArgvForMutableOperand(argv);
   const executable = normalizeExecutableToken(unwrapped.argv[0] ?? "");
@@ -156,14 +281,12 @@ function resolveMutableFileOperandIndex(argv: string[]): number | null {
     const shellIndex = resolvePosixShellScriptOperandIndex(unwrapped.argv);
     return shellIndex === null ? null : unwrapped.baseIndex + shellIndex;
   }
-  if (!MUTABLE_ARGV1_INTERPRETER_PATTERNS.some((pattern) => pattern.test(executable))) {
+  const family = resolveInterpreterFamily(executable);
+  if (!family) {
     return null;
   }
-  const operand = unwrapped.argv[1]?.trim() ?? "";
-  if (!operand || operand === "-" || operand.startsWith("-")) {
-    return null;
-  }
-  return unwrapped.baseIndex + 1;
+  const interpreterIndex = resolveMutableInterpreterScriptOperandIndex(unwrapped.argv, family);
+  return interpreterIndex === null ? null : unwrapped.baseIndex + interpreterIndex;
 }
 
 function resolveMutableFileOperandSnapshotSync(params: {
