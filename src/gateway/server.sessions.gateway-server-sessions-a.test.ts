@@ -753,6 +753,45 @@ describe("gateway server sessions", () => {
     ws.close();
   });
 
+  test("sessions.compact refuses while an embedded run is active", async () => {
+    const { dir } = await createSessionStoreDir();
+    const transcriptPath = path.join(dir, "sess-active.jsonl");
+    const lines = Array.from({ length: 6 }, (_, i) =>
+      JSON.stringify({ role: i % 2 === 0 ? "user" : "assistant", content: `line-${i}` }),
+    );
+    await fs.writeFile(transcriptPath, `${lines.join("\n")}\n`, "utf-8");
+
+    await writeSessionStore({
+      entries: {
+        main: { sessionId: "sess-main", updatedAt: Date.now() },
+        "discord:group:dev": {
+          sessionId: "sess-active",
+          updatedAt: Date.now(),
+        },
+      },
+    });
+
+    embeddedRunMock.activeIds.add("sess-active");
+
+    const { ws } = await openClient();
+    const compacted = await rpcReq(ws, "sessions.compact", {
+      key: "discord:group:dev",
+      maxLines: 3,
+    });
+    expect(compacted.ok).toBe(false);
+    expect((compacted.error as { message?: unknown } | undefined)?.message ?? "").toMatch(
+      /still active/i,
+    );
+    expect(embeddedRunMock.abortCalls).toEqual([]);
+
+    const after = await fs.readFile(transcriptPath, "utf-8");
+    expect(after.trim().split(/\r?\n/).filter(Boolean)).toHaveLength(6);
+    const files = await fs.readdir(dir);
+    expect(files.some((f) => f.startsWith("sess-active.jsonl.bak."))).toBe(false);
+
+    ws.close();
+  });
+
   test("sessions.delete closes ACP runtime handles before removing ACP sessions", async () => {
     const { dir } = await createSessionStoreDir();
     await writeSingleLineSession(dir, "sess-main", "hello");

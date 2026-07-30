@@ -3,7 +3,12 @@ import fs from "node:fs";
 import { getAcpSessionManager } from "../../acp/control-plane/manager.js";
 import { resolveDefaultAgentId } from "../../agents/agent-scope.js";
 import { clearBootstrapSnapshot } from "../../agents/bootstrap-cache.js";
-import { abortEmbeddedPiRun, waitForEmbeddedPiRunEnd } from "../../agents/pi-embedded.js";
+import {
+  abortEmbeddedPiRun,
+  isEmbeddedPiRunActive,
+  waitForEmbeddedPiRunEnd,
+} from "../../agents/pi-embedded.js";
+import { acquireSessionWriteLock } from "../../agents/session-write-lock.js";
 import { stopSubagentsForRequester } from "../../auto-reply/reply/abort.js";
 import { clearSessionQueues } from "../../auto-reply/reply/queue.js";
 import { closeTrackedBrowserTabsForSessions } from "../../browser/session-tab-registry.js";
@@ -665,7 +670,8 @@ export const sessionsHandlers: GatewayRequestHandlers = {
         : 400;
 
     const { cfg, target, storePath } = resolveGatewaySessionTargetFromKey(key);
-    // Lock + read in a short critical section; transcript work happens outside.
+    // Resolve the store entry under the sessions.json lock, then coordinate the
+    // transcript rewrite with the session write lock (and refuse while a run is live).
     const compactTarget = await updateSessionStore(storePath, (store) => {
       const { entry, primaryKey } = migrateAndPruneSessionStoreKey({ cfg, key, store });
       return { entry, primaryKey };
@@ -682,6 +688,21 @@ export const sessionsHandlers: GatewayRequestHandlers = {
           reason: "no sessionId",
         },
         undefined,
+      );
+      return;
+    }
+
+    // Embedded runs hold the transcript write lock for the whole turn. Compacting
+    // without coordinating would rename/rewrite the live JSONL out from under
+    // SessionManager and silently drop in-flight history.
+    if (isEmbeddedPiRunActive(sessionId)) {
+      respond(
+        false,
+        undefined,
+        errorShape(
+          ErrorCodes.UNAVAILABLE,
+          `Session ${key} is still active; try again in a moment.`,
+        ),
       );
       return;
     }
@@ -706,25 +727,71 @@ export const sessionsHandlers: GatewayRequestHandlers = {
       return;
     }
 
-    const raw = fs.readFileSync(filePath, "utf-8");
-    const lines = raw.split(/\r?\n/).filter((l) => l.trim().length > 0);
-    if (lines.length <= maxLines) {
+    let archived: string | undefined;
+    let kept = 0;
+    let compacted = false;
+    let lock: { release: () => Promise<void> } | undefined;
+    try {
+      // Non-reentrant: same-process embedded runs already hold this lock.
+      lock = await acquireSessionWriteLock({
+        sessionFile: filePath,
+        timeoutMs: 15_000,
+        allowReentrant: false,
+      });
+      // Re-check after waiting — a run may have started while we queued.
+      if (isEmbeddedPiRunActive(sessionId)) {
+        respond(
+          false,
+          undefined,
+          errorShape(
+            ErrorCodes.UNAVAILABLE,
+            `Session ${key} is still active; try again in a moment.`,
+          ),
+        );
+        return;
+      }
+
+      const raw = fs.readFileSync(filePath, "utf-8");
+      const lines = raw.split(/\r?\n/).filter((l) => l.trim().length > 0);
+      if (lines.length <= maxLines) {
+        respond(
+          true,
+          {
+            ok: true,
+            key: target.canonicalKey,
+            compacted: false,
+            kept: lines.length,
+          },
+          undefined,
+        );
+        return;
+      }
+
+      archived = archiveFileOnDisk(filePath, "bak");
+      const keptLines = lines.slice(-maxLines);
+      fs.writeFileSync(filePath, `${keptLines.join("\n")}\n`, "utf-8");
+      kept = keptLines.length;
+      compacted = true;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
       respond(
-        true,
-        {
-          ok: true,
-          key: target.canonicalKey,
-          compacted: false,
-          kept: lines.length,
-        },
+        false,
         undefined,
+        errorShape(
+          ErrorCodes.UNAVAILABLE,
+          message.includes("lock")
+            ? `Session ${key} is still active; try again in a moment.`
+            : `Failed to compact session ${key}: ${message}`,
+        ),
       );
       return;
+    } finally {
+      await lock?.release().catch(() => undefined);
     }
 
-    const archived = archiveFileOnDisk(filePath, "bak");
-    const keptLines = lines.slice(-maxLines);
-    fs.writeFileSync(filePath, `${keptLines.join("\n")}\n`, "utf-8");
+    if (!compacted) {
+      return;
+    }
 
     await updateSessionStore(storePath, (store) => {
       const entryKey = compactTarget.primaryKey;
@@ -746,7 +813,7 @@ export const sessionsHandlers: GatewayRequestHandlers = {
         key: target.canonicalKey,
         compacted: true,
         archived,
-        kept: keptLines.length,
+        kept,
       },
       undefined,
     );
