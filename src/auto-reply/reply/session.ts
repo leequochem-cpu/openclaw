@@ -6,6 +6,11 @@ import {
 } from "../../acp/conversation-id.js";
 import { resolveSessionAgentId } from "../../agents/agent-scope.js";
 import { clearBootstrapSnapshotOnSessionRollover } from "../../agents/bootstrap-cache.js";
+import {
+  abortEmbeddedPiRun,
+  isEmbeddedPiRunActive,
+  waitForEmbeddedPiRunEnd,
+} from "../../agents/pi-embedded.js";
 import { normalizeChatType } from "../../channels/chat-type.js";
 import type { OpenClawConfig } from "../../config/config.js";
 import {
@@ -37,9 +42,11 @@ import { normalizeMainKey, parseAgentSessionKey } from "../../routing/session-ke
 import { normalizeSessionDeliveryFields } from "../../utils/delivery-context.js";
 import { resolveCommandAuthorization } from "../command-auth.js";
 import type { MsgContext, TemplateContext } from "../templating.js";
+import { stopSubagentsForRequester } from "./abort.js";
 import { resolveEffectiveResetTargetSessionKey } from "./acp-reset-target.js";
 import { normalizeInboundTextNewlines } from "./inbound-text.js";
 import { stripMentions, stripStructuralPrefixes } from "./mentions.js";
+import { clearSessionQueues } from "./queue.js";
 import {
   maybeRetireLegacyMainDeliveryRoute,
   resolveLastChannelRaw,
@@ -47,6 +54,27 @@ import {
 } from "./session-delivery.js";
 import { forkSessionFromParent, resolveParentForkMaxTokens } from "./session-fork.js";
 import { buildSessionEndHookPayload, buildSessionStartHookPayload } from "./session-hooks.js";
+
+const SESSION_RESET_RUNTIME_CLEANUP_TIMEOUT_MS = 15_000;
+
+/**
+ * Stop writers for the previous transcript before renaming it on /new, /reset,
+ * or daily/idle rollover. Gateway sessions.reset already does this; messaging
+ * reset must too or an active append can recreate a truncated orphan file.
+ */
+async function cleanupPreviousSessionRuntimeBeforeArchive(params: {
+  cfg: OpenClawConfig;
+  sessionKey: string;
+  sessionId: string;
+}): Promise<boolean> {
+  clearSessionQueues([params.sessionKey, params.sessionId]);
+  stopSubagentsForRequester({ cfg: params.cfg, requesterSessionKey: params.sessionKey });
+  if (!isEmbeddedPiRunActive(params.sessionId)) {
+    return true;
+  }
+  abortEmbeddedPiRun(params.sessionId);
+  return await waitForEmbeddedPiRunEnd(params.sessionId, SESSION_RESET_RUNTIME_CLEANUP_TIMEOUT_MS);
+}
 
 const log = createSubsystemLogger("session-init");
 
@@ -564,14 +592,28 @@ export async function initSessionState(params: {
   );
 
   // Archive old transcript so it doesn't accumulate on disk (#14869).
+  // Abort/wait the previous embedded run first — otherwise rename races the
+  // still-active writer and can truncate/orphan history (same class as sessions.compact).
   if (previousSessionEntry?.sessionId) {
-    archiveSessionTranscripts({
-      sessionId: previousSessionEntry.sessionId,
-      storePath,
-      sessionFile: previousSessionEntry.sessionFile,
-      agentId,
-      reason: "reset",
+    const previousSessionId = previousSessionEntry.sessionId;
+    const ended = await cleanupPreviousSessionRuntimeBeforeArchive({
+      cfg,
+      sessionKey,
+      sessionId: previousSessionId,
     });
+    if (ended) {
+      archiveSessionTranscripts({
+        sessionId: previousSessionId,
+        storePath,
+        sessionFile: previousSessionEntry.sessionFile,
+        agentId,
+        reason: "reset",
+      });
+    } else {
+      log.warn(
+        `skipping transcript archive for active session ${previousSessionId}; leaving file in place to avoid corruption`,
+      );
+    }
   }
 
   const sessionCtx: TemplateContext = {
