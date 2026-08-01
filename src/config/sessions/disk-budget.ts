@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { isSessionWriteLockHeld } from "../../agents/session-write-lock.js";
 import { isPrimarySessionTranscriptFileName, isSessionArchiveArtifactName } from "./artifacts.js";
 import { resolveSessionFilePath } from "./paths.js";
 import type { SessionEntry } from "./types.js";
@@ -171,6 +172,10 @@ async function removeFileForBudget(params: {
 }): Promise<number> {
   const resolvedPath = path.resolve(params.filePath);
   const canonicalPath = params.canonicalPath ?? canonicalizePathForComparison(resolvedPath);
+  // Do not delete a live transcript that still has an in-process writer.
+  if (isSessionWriteLockHeld(resolvedPath) || isSessionWriteLockHeld(canonicalPath)) {
+    return 0;
+  }
   if (params.dryRun) {
     if (params.simulatedRemovedPaths.has(canonicalPath)) {
       return 0;

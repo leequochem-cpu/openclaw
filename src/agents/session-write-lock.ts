@@ -441,6 +441,23 @@ export async function cleanStaleLockFiles(params: {
   return { locks, cleaned };
 }
 
+/**
+ * True when this process currently holds the write lock for `sessionFile`.
+ * Used by archive/maintenance paths to avoid renaming/deleting a live transcript.
+ */
+export function isSessionWriteLockHeld(sessionFile: string): boolean {
+  const resolved = path.resolve(sessionFile);
+  if (HELD_LOCKS.has(resolved)) {
+    return true;
+  }
+  try {
+    const normalizedDir = fsSync.realpathSync(path.dirname(resolved));
+    return HELD_LOCKS.has(path.join(normalizedDir, path.basename(resolved)));
+  } catch {
+    return false;
+  }
+}
+
 export async function acquireSessionWriteLock(params: {
   sessionFile: string;
   timeoutMs?: number;

@@ -786,4 +786,34 @@ describe("archiveSessionTranscripts", () => {
     expect(archived[0]).toContain(".deleted.");
     expect(fs.existsSync(transcriptPath)).toBe(false);
   });
+
+  test("skips transcripts while the session write lock is held", async () => {
+    const { acquireSessionWriteLock } = await import("../agents/session-write-lock.js");
+    const sessionId = "sess-archive-locked";
+    const transcriptPath = path.join(tmpDir, `${sessionId}.jsonl`);
+    fs.writeFileSync(transcriptPath, '{"type":"session"}\n', "utf-8");
+
+    const lock = await acquireSessionWriteLock({ sessionFile: transcriptPath, timeoutMs: 500 });
+    try {
+      const archived = archiveSessionTranscripts({
+        sessionId,
+        storePath,
+        sessionFile: transcriptPath,
+        reason: "reset",
+      });
+      expect(archived).toEqual([]);
+      expect(fs.existsSync(transcriptPath)).toBe(true);
+    } finally {
+      await lock.release();
+    }
+
+    const archivedAfter = archiveSessionTranscripts({
+      sessionId,
+      storePath,
+      sessionFile: transcriptPath,
+      reason: "reset",
+    });
+    expect(archivedAfter).toHaveLength(1);
+    expect(fs.existsSync(transcriptPath)).toBe(false);
+  });
 });
