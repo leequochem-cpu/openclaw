@@ -18,6 +18,7 @@ import {
   __testing,
   acquireSessionWriteLock,
   cleanStaleLockFiles,
+  isSessionWriteLockHeld,
   resolveSessionLockMaxHoldFromTimeout,
 } from "./session-write-lock.js";
 
@@ -93,6 +94,18 @@ async function expectActiveInProcessLockIsNotReclaimed(params?: {
     await lock.release();
   });
 }
+
+describe("isSessionWriteLockHeld", () => {
+  it("reports whether this process currently holds the lock", async () => {
+    await withTempSessionLockFile(async ({ sessionFile }) => {
+      expect(isSessionWriteLockHeld(sessionFile)).toBe(false);
+      const lock = await acquireSessionWriteLock({ sessionFile, timeoutMs: 500 });
+      expect(isSessionWriteLockHeld(sessionFile)).toBe(true);
+      await lock.release();
+      expect(isSessionWriteLockHeld(sessionFile)).toBe(false);
+    });
+  });
+});
 
 describe("acquireSessionWriteLock", () => {
   it("reuses locks across symlinked session paths", async () => {

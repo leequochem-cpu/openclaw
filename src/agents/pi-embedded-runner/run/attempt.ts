@@ -1067,6 +1067,9 @@ export async function runEmbeddedAttempt(
     let sessionManager: ReturnType<typeof guardSessionManager> | undefined;
     let session: Awaited<ReturnType<typeof createAgentSession>>["session"] | undefined;
     let removeToolResultContextGuard: (() => void) | undefined;
+    // Cleared only after transcript flush + session lock release so waiters
+    // (sessions.reset/delete, /new archive) cannot rename the file mid-teardown.
+    let activeQueueHandle: EmbeddedPiQueueHandle | undefined;
     try {
       await repairSessionFileIfNeeded({
         sessionFile: params.sessionFile,
@@ -1556,6 +1559,7 @@ export async function runEmbeddedAttempt(
         isCompacting: () => subscription.isCompacting(),
         abort: abortRun,
       };
+      activeQueueHandle = queueHandle;
       setActiveEmbeddedRun(params.sessionId, queueHandle, params.sessionKey);
 
       let abortWarnTimer: NodeJS.Timeout | undefined;
@@ -1986,7 +1990,6 @@ export async function runEmbeddedAttempt(
             `CRITICAL: unsubscribe failed, possible resource leak: runId=${params.runId} ${String(err)}`,
           );
         }
-        clearActiveEmbeddedRun(params.sessionId, queueHandle, params.sessionKey);
         params.abortSignal?.removeEventListener?.("abort", onAbort);
       }
 
@@ -2072,6 +2075,10 @@ export async function runEmbeddedAttempt(
       session?.dispose();
       releaseWsSession(params.sessionId);
       await sessionLock.release();
+      // Notify run-end waiters only after the transcript is idle and unlocked.
+      if (activeQueueHandle) {
+        clearActiveEmbeddedRun(params.sessionId, activeQueueHandle, params.sessionKey);
+      }
     }
   } finally {
     restoreSkillEnv?.();

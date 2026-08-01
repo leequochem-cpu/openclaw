@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { isSessionWriteLockHeld } from "../agents/session-write-lock.js";
 import {
   formatSessionArchiveTimestamp,
   parseSessionArchiveTimestamp,
@@ -11,11 +12,14 @@ import {
 } from "../config/sessions.js";
 import { resolveRequiredHomeDir } from "../infra/home-dir.js";
 import { jsonUtf8Bytes } from "../infra/json-utf8-bytes.js";
+import { createSubsystemLogger } from "../logging/subsystem.js";
 import { hasInterSessionUserProvenance } from "../sessions/input-provenance.js";
 import { stripInlineDirectiveTagsForDisplay } from "../utils/directive-tags.js";
 import { extractToolCallNames, hasToolCall } from "../utils/transcript-tools.js";
 import { stripEnvelope } from "./chat-sanitize.js";
 import type { SessionPreviewItem } from "./session-utils.types.js";
+
+const log = createSubsystemLogger("gateway/session-utils");
 
 type SessionTitleFields = {
   firstUserMessage: string | null;
@@ -216,6 +220,17 @@ export function archiveSessionTranscripts(opts: {
       }
     }
     if (!fs.existsSync(candidatePath)) {
+      continue;
+    }
+    // Never rename a transcript while this process still holds its write lock —
+    // sessions.reset/delete and maintenance can otherwise race abort teardown
+    // (flushPendingToolResults / SessionManager still writing).
+    if (isSessionWriteLockHeld(candidatePath)) {
+      log.warn("skipping transcript archive while session write lock is held", {
+        sessionId: opts.sessionId,
+        path: candidatePath,
+        reason: opts.reason,
+      });
       continue;
     }
     try {
