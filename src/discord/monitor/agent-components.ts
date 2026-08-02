@@ -29,6 +29,10 @@ import { recordInboundSession } from "../../channels/session.js";
 import type { OpenClawConfig } from "../../config/config.js";
 import { isDangerousNameMatchingEnabled } from "../../config/dangerous-name-matching.js";
 import { resolveMarkdownTableMode } from "../../config/markdown-tables.js";
+import {
+  resolveDefaultGroupPolicy,
+  resolveOpenProviderRuntimeGroupPolicy,
+} from "../../config/runtime-group-policy.js";
 import { readSessionUpdatedAt, resolveStorePath } from "../../config/sessions.js";
 import type { DiscordAccountConfig } from "../../config/types.discord.js";
 import { logVerbose } from "../../globals.js";
@@ -56,6 +60,7 @@ import {
 } from "../components.js";
 import {
   type DiscordGuildEntryResolved,
+  isDiscordGroupAllowedByPolicy,
   normalizeDiscordAllowList,
   normalizeDiscordSlug,
   resolveDiscordAllowListMatch,
@@ -235,6 +240,7 @@ async function resolveComponentInteractionContext(params: {
 }
 
 async function ensureGuildComponentMemberAllowed(params: {
+  ctx: AgentComponentContext;
   interaction: AgentComponentInteraction;
   guildInfo: ReturnType<typeof resolveDiscordGuildEntry>;
   channelId: string;
@@ -248,6 +254,7 @@ async function ensureGuildComponentMemberAllowed(params: {
   allowNameMatching: boolean;
 }): Promise<boolean> {
   const {
+    ctx,
     interaction,
     guildInfo,
     channelId,
@@ -274,6 +281,52 @@ async function ensureGuildComponentMemberAllowed(params: {
     parentSlug: channelCtx.parentSlug,
     scope: channelCtx.isThread ? "thread" : "channel",
   });
+
+  // Match message preflight / native slash / voice: guild route policy gates
+  // whether this channel may drive inbound processing at all.
+  if (channelConfig?.enabled === false) {
+    logVerbose(`agent ${componentLabel}: blocked channel ${channelId} (disabled)`);
+    try {
+      await interaction.reply({
+        content: "This channel is disabled.",
+        ...replyOpts,
+      });
+    } catch {
+      // Interaction may have expired
+    }
+    return false;
+  }
+
+  const channelAllowlistConfigured =
+    Boolean(guildInfo?.channels) && Object.keys(guildInfo?.channels ?? {}).length > 0;
+  const channelAllowed = channelConfig?.allowed !== false;
+  const { groupPolicy } = resolveOpenProviderRuntimeGroupPolicy({
+    providerConfigPresent: ctx.cfg.channels?.discord !== undefined,
+    groupPolicy: ctx.discordConfig?.groupPolicy ?? ctx.cfg.channels?.discord?.groupPolicy,
+    defaultGroupPolicy: resolveDefaultGroupPolicy(ctx.cfg),
+  });
+  if (
+    !isDiscordGroupAllowedByPolicy({
+      groupPolicy,
+      guildAllowlisted: Boolean(guildInfo),
+      channelAllowlistConfigured,
+      channelAllowed,
+    }) ||
+    channelConfig?.allowed === false
+  ) {
+    logVerbose(
+      `agent ${componentLabel}: blocked channel ${channelId} (groupPolicy=${groupPolicy}, guildAllowlisted=${Boolean(guildInfo)}, channelAllowed=${channelAllowed})`,
+    );
+    try {
+      await interaction.reply({
+        content: "This channel is not allowed.",
+        ...replyOpts,
+      });
+    } catch {
+      // Interaction may have expired
+    }
+    return false;
+  }
 
   const { memberAllowed } = resolveDiscordMemberAccessState({
     channelConfig,
@@ -363,6 +416,7 @@ async function ensureAgentComponentInteractionAllowed(params: {
   });
   const channelCtx = resolveDiscordChannelContext(params.interaction);
   const memberAllowed = await ensureGuildComponentMemberAllowed({
+    ctx: params.ctx,
     interaction: params.interaction,
     guildInfo,
     channelId: params.channelId,
@@ -1093,6 +1147,7 @@ async function handleDiscordComponentEvent(params: {
   const channelCtx = resolveDiscordChannelContext(params.interaction);
   const unauthorizedReply = `You are not authorized to use this ${params.componentLabel}.`;
   const memberAllowed = await ensureGuildComponentMemberAllowed({
+    ctx: params.ctx,
     interaction: params.interaction,
     guildInfo,
     channelId,
@@ -1245,6 +1300,7 @@ async function handleDiscordModalTrigger(params: {
   const channelCtx = resolveDiscordChannelContext(params.interaction);
   const unauthorizedReply = "You are not authorized to use this form.";
   const memberAllowed = await ensureGuildComponentMemberAllowed({
+    ctx: params.ctx,
     interaction: params.interaction,
     guildInfo,
     channelId,
@@ -1694,6 +1750,7 @@ class DiscordComponentModal extends Modal {
     });
     const channelCtx = resolveDiscordChannelContext(interaction);
     const memberAllowed = await ensureGuildComponentMemberAllowed({
+      ctx: this.ctx,
       interaction,
       guildInfo,
       channelId,
