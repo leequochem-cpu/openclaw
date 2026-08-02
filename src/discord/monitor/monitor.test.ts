@@ -461,6 +461,118 @@ describe("discord component interactions", () => {
     expect(lastDispatchCtx?.CommandAuthorized).toBe(false);
   });
 
+  it("blocks guild button interactions when groupPolicy is disabled", async () => {
+    registerDiscordComponentEntries({
+      entries: [createButtonEntry()],
+      modals: [],
+    });
+
+    const button = createDiscordComponentButton(
+      createComponentContext({
+        cfg: {
+          channels: { discord: { replyToMode: "first", groupPolicy: "disabled" } },
+        } as OpenClawConfig,
+        discordConfig: createDiscordConfig({ groupPolicy: "disabled" }),
+        guildEntries: {
+          "guild-1": {
+            id: "guild-1",
+            slug: "test-guild",
+            channels: { "guild-channel": {} },
+          },
+        },
+      }),
+    );
+    const { interaction, reply } = createComponentButtonInteraction({
+      rawData: {
+        channel_id: "guild-channel",
+        guild_id: "guild-1",
+        id: "interaction-guild-disabled",
+        member: { roles: [] },
+      } as unknown as ButtonInteraction["rawData"],
+      guild: { id: "guild-1", name: "Test Guild" } as unknown as ButtonInteraction["guild"],
+    });
+
+    await button.run(interaction, { cid: "btn_1" } as ComponentData);
+
+    expect(reply).toHaveBeenCalledWith({ content: "This channel is not allowed." });
+    expect(dispatchReplyMock).not.toHaveBeenCalled();
+    expect(resolveDiscordComponentEntry({ id: "btn_1", consume: false })).not.toBeNull();
+  });
+
+  it("blocks guild button interactions when guild is not allowlisted", async () => {
+    registerDiscordComponentEntries({
+      entries: [createButtonEntry()],
+      modals: [],
+    });
+
+    const button = createDiscordComponentButton(
+      createComponentContext({
+        cfg: {
+          channels: { discord: { replyToMode: "first", groupPolicy: "allowlist" } },
+        } as OpenClawConfig,
+        discordConfig: createDiscordConfig({ groupPolicy: "allowlist" }),
+        guildEntries: {
+          "other-guild": {
+            id: "other-guild",
+            slug: "other",
+            channels: { "other-channel": {} },
+          },
+        },
+      }),
+    );
+    const { interaction, reply } = createComponentButtonInteraction({
+      rawData: {
+        channel_id: "guild-channel",
+        guild_id: "guild-1",
+        id: "interaction-guild-missing",
+        member: { roles: [] },
+      } as unknown as ButtonInteraction["rawData"],
+      guild: { id: "guild-1", name: "Test Guild" } as unknown as ButtonInteraction["guild"],
+    });
+
+    await button.run(interaction, { cid: "btn_1" } as ComponentData);
+
+    expect(reply).toHaveBeenCalledWith({ content: "This channel is not allowed." });
+    expect(dispatchReplyMock).not.toHaveBeenCalled();
+  });
+
+  it("blocks guild button interactions when channel is not in guild allowlist", async () => {
+    registerDiscordComponentEntries({
+      entries: [createButtonEntry()],
+      modals: [],
+    });
+
+    const button = createDiscordComponentButton(
+      createComponentContext({
+        cfg: {
+          channels: { discord: { replyToMode: "first", groupPolicy: "allowlist" } },
+        } as OpenClawConfig,
+        discordConfig: createDiscordConfig({ groupPolicy: "allowlist" }),
+        guildEntries: {
+          "guild-1": {
+            id: "guild-1",
+            slug: "test-guild",
+            channels: { "allowed-channel": {} },
+          },
+        },
+      }),
+    );
+    const { interaction, reply } = createComponentButtonInteraction({
+      rawData: {
+        channel_id: "blocked-channel",
+        guild_id: "guild-1",
+        id: "interaction-guild-channel-denied",
+        member: { roles: [] },
+      } as unknown as ButtonInteraction["rawData"],
+      guild: { id: "guild-1", name: "Test Guild" } as unknown as ButtonInteraction["guild"],
+    });
+
+    await button.run(interaction, { cid: "btn_1" } as ComponentData);
+
+    expect(reply).toHaveBeenCalledWith({ content: "This channel is not allowed." });
+    expect(dispatchReplyMock).not.toHaveBeenCalled();
+  });
+
   it("marks guild modal events as command-authorized for allowlisted users", async () => {
     registerDiscordComponentEntries({
       entries: [],
