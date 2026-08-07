@@ -253,6 +253,23 @@ describe("applyConfig", () => {
     });
   });
 
+  it("refuses to apply when the loaded snapshot is invalid", async () => {
+    const request = vi.fn().mockResolvedValue({});
+    const state = createState();
+    state.connected = true;
+    state.client = { request } as unknown as ConfigState["client"];
+    state.configValid = false;
+    state.configFormMode = "raw";
+    state.configRaw = '{\n  gateway: { mode: "local" }\n}\n';
+    state.configSnapshot = { hash: "hash-invalid" };
+
+    await applyConfig(state);
+
+    expect(request).not.toHaveBeenCalled();
+    expect(state.lastError).toContain("invalid");
+    expect(state.lastError).toContain("doctor");
+  });
+
   it("coerces schema-typed values before config.apply in form mode", async () => {
     const request = createRequestWithConfigGet();
     const state = createState();
@@ -297,6 +314,23 @@ describe("applyConfig", () => {
 });
 
 describe("saveConfig", () => {
+  it("refuses to save when the loaded snapshot is invalid", async () => {
+    const request = vi.fn().mockResolvedValue({});
+    const state = createState();
+    state.connected = true;
+    state.client = { request } as unknown as ConfigState["client"];
+    state.configValid = false;
+    state.configFormMode = "raw";
+    state.configRaw = '{\n  gateway: { mode: "local" }\n}\n';
+    state.configSnapshot = { hash: "hash-invalid" };
+
+    await saveConfig(state);
+
+    expect(request).not.toHaveBeenCalled();
+    expect(state.lastError).toContain("invalid");
+    expect(state.lastError).toContain("doctor");
+  });
+
   it("coerces schema-typed values before config.set in form mode", async () => {
     const request = createRequestWithConfigGet();
     const state = createState();

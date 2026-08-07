@@ -449,17 +449,22 @@ export function renderConfig(props: ConfigProps) {
 
   // Save/apply buttons require actual changes to be enabled.
   // Note: formUnsafe warns about unsupported schema paths but shouldn't block saving.
+  // Invalid on-disk snapshots redact to an empty form — refuse Save/Apply so users
+  // cannot wipe credentials that the UI never received.
+  const canWriteValidSnapshot = props.valid !== false;
   const canSaveForm = Boolean(props.formValue) && !props.loading && Boolean(analysis.schema);
   const canSave =
     props.connected &&
     !props.saving &&
     hasChanges &&
+    canWriteValidSnapshot &&
     (props.formMode === "raw" ? true : canSaveForm);
   const canApply =
     props.connected &&
     !props.applying &&
     !props.updating &&
     hasChanges &&
+    canWriteValidSnapshot &&
     (props.formMode === "raw" ? true : canSaveForm);
   const canUpdate = props.connected && !props.applying && !props.updating;
   const selectedTags = new Set(getTagFilters(props.searchQuery));
