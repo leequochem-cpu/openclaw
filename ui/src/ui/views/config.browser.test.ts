@@ -134,6 +134,26 @@ describe("config view", () => {
     expect(applyButton?.disabled).toBe(false);
   });
 
+  it("disables save and apply when the on-disk snapshot is invalid", () => {
+    const container = document.createElement("div");
+    render(
+      renderConfig({
+        ...baseProps(),
+        valid: false,
+        formMode: "raw",
+        raw: '{\n  gateway: { mode: "local" }\n}\n',
+        originalRaw: "{\n}\n",
+      }),
+      container,
+    );
+
+    const { saveButton, applyButton } = findActionButtons(container);
+    expect(saveButton).not.toBeUndefined();
+    expect(applyButton).not.toBeUndefined();
+    expect(saveButton?.disabled).toBe(true);
+    expect(applyButton?.disabled).toBe(true);
+  });
+
   it("switches mode via the sidebar toggle", () => {
     const container = document.createElement("div");
     const onFormModeChange = vi.fn();

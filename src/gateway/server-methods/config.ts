@@ -100,6 +100,25 @@ function requireConfigBaseHash(
   return true;
 }
 
+function requireValidConfigSnapshot(
+  snapshot: Awaited<ReturnType<typeof readConfigFileSnapshot>>,
+  respond: RespondFn,
+  action: string,
+): boolean {
+  if (snapshot.valid) {
+    return true;
+  }
+  // Invalid snapshots redact to an empty config for config.get. Refusing writes
+  // here prevents Control UI Save/Apply from persisting that empty shape and
+  // wiping credentials that restoreRedactedValues cannot reconstruct.
+  respond(
+    false,
+    undefined,
+    errorShape(ErrorCodes.INVALID_REQUEST, `invalid config; fix before ${action}`),
+  );
+  return false;
+}
+
 function parseRawConfigOrRespond(
   params: unknown,
   requestName: string,
@@ -314,6 +333,9 @@ export const configHandlers: GatewayRequestHandlers = {
     if (!requireConfigBaseHash(params, snapshot, respond)) {
       return;
     }
+    if (!requireValidConfigSnapshot(snapshot, respond, "setting")) {
+      return;
+    }
     const parsed = parseValidateConfigFromRawOrRespond(params, "config.set", snapshot, respond);
     if (!parsed) {
       return;
@@ -337,12 +359,7 @@ export const configHandlers: GatewayRequestHandlers = {
     if (!requireConfigBaseHash(params, snapshot, respond)) {
       return;
     }
-    if (!snapshot.valid) {
-      respond(
-        false,
-        undefined,
-        errorShape(ErrorCodes.INVALID_REQUEST, "invalid config; fix before patching"),
-      );
+    if (!requireValidConfigSnapshot(snapshot, respond, "patching")) {
       return;
     }
     const rawValue = (params as { raw?: unknown }).raw;
@@ -457,6 +474,9 @@ export const configHandlers: GatewayRequestHandlers = {
     }
     const { snapshot, writeOptions } = await readConfigFileSnapshotForWrite();
     if (!requireConfigBaseHash(params, snapshot, respond)) {
+      return;
+    }
+    if (!requireValidConfigSnapshot(snapshot, respond, "applying")) {
       return;
     }
     const parsed = parseValidateConfigFromRawOrRespond(params, "config.apply", snapshot, respond);

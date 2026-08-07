@@ -131,6 +131,10 @@ export async function saveConfig(state: ConfigState) {
   if (!state.client || !state.connected) {
     return;
   }
+  if (state.configValid === false) {
+    state.lastError = "Config on disk is invalid; run openclaw doctor before saving.";
+    return;
+  }
   state.configSaving = true;
   state.lastError = null;
   try {
@@ -152,6 +156,10 @@ export async function saveConfig(state: ConfigState) {
 
 export async function applyConfig(state: ConfigState) {
   if (!state.client || !state.connected) {
+    return;
+  }
+  if (state.configValid === false) {
+    state.lastError = "Config on disk is invalid; run openclaw doctor before applying.";
     return;
   }
   state.configApplying = true;
