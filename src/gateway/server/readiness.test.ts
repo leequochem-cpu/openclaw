@@ -149,6 +149,30 @@ describe("createReadinessChecker", () => {
     vi.useRealTimers();
   });
 
+  it("reports sticky restartPending channels not ready after backoff grace expires", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-06T12:00:00Z"));
+    const startedAt = Date.now() - 5 * 60_000;
+    const manager = createManager(
+      snapshotWith({
+        discord: {
+          running: false,
+          restartPending: true,
+          reconnectAttempts: 1,
+          enabled: true,
+          configured: true,
+          lastStartAt: startedAt - 30_000,
+          // Beyond max channel restart backoff (5m) + buffer.
+          lastStopAt: Date.now() - 7 * 60_000,
+        },
+      }),
+    );
+
+    const readiness = createReadinessChecker({ channelManager: manager, startedAt });
+    expect(readiness()).toEqual({ ready: false, failing: ["discord"], uptimeMs: 300_000 });
+    vi.useRealTimers();
+  });
+
   it("treats stale-socket channels as ready to avoid pulling healthy idle pods", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-06T12:00:00Z"));

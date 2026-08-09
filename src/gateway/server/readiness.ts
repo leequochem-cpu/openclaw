@@ -17,18 +17,30 @@ export type ReadinessResult = {
 export type ReadinessChecker = () => ReadinessResult;
 
 const DEFAULT_READINESS_CACHE_TTL_MS = 1_000;
+// Must stay >= CHANNEL_RESTART_POLICY.maxMs in server-channels.ts (5 minutes).
+// Sticky restartPending must not hide a dead channel from /ready forever.
+const RESTART_PENDING_READINESS_GRACE_MS = 6 * 60_000;
 
 function shouldIgnoreReadinessFailure(
   accountSnapshot: ChannelAccountSnapshot,
   health: ChannelHealthEvaluation,
+  now: number,
 ): boolean {
   if (health.reason === "unmanaged" || health.reason === "stale-socket") {
     return true;
   }
   // Channel restarts spend time in backoff with running=false before the next
   // lifecycle re-enters startup grace. Keep readiness green during that handoff
-  // window, but still surface hard failures once restart attempts are exhausted.
-  return health.reason === "not-running" && accountSnapshot.restartPending === true;
+  // window, but only while the stop→restart gap is still within the max backoff
+  // budget. A leaked restartPending (empty catch / aborted handoff) must go red.
+  if (health.reason !== "not-running" || accountSnapshot.restartPending !== true) {
+    return false;
+  }
+  const lastStopAt = accountSnapshot.lastStopAt;
+  if (typeof lastStopAt !== "number" || !Number.isFinite(lastStopAt)) {
+    return false;
+  }
+  return now - lastStopAt <= RESTART_PENDING_READINESS_GRACE_MS;
 }
 
 export function createReadinessChecker(deps: {
@@ -66,7 +78,7 @@ export function createReadinessChecker(deps: {
           channelId,
         };
         const health = evaluateChannelHealth(accountSnapshot, policy);
-        if (!health.healthy && !shouldIgnoreReadinessFailure(accountSnapshot, health)) {
+        if (!health.healthy && !shouldIgnoreReadinessFailure(accountSnapshot, health, now)) {
           failing.push(channelId);
           break;
         }

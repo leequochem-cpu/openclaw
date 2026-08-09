@@ -88,13 +88,16 @@ function installTestRegistry(plugin: ChannelPlugin<TestAccount>) {
   setActivePluginRegistry(registry);
 }
 
-function createManager(options?: { channelRuntime?: PluginRuntime["channel"] }) {
+function createManager(options?: {
+  channelRuntime?: PluginRuntime["channel"];
+  loadConfig?: () => Record<string, unknown>;
+}) {
   const log = createSubsystemLogger("gateway/server-channels-test");
   const channelLogs = { discord: log } as Record<ChannelId, SubsystemLogger>;
   const runtime = runtimeForLogger(log);
   const channelRuntimeEnvs = { discord: runtime } as Record<ChannelId, RuntimeEnv>;
   return createChannelManager({
-    loadConfig: () => ({}),
+    loadConfig: options?.loadConfig ?? (() => ({})),
     channelLogs,
     channelRuntimeEnvs,
     ...(options?.channelRuntime ? { channelRuntime: options.channelRuntime } : {}),
@@ -132,7 +135,9 @@ describe("server-channels auto restart", () => {
     const snapshot = manager.getRuntimeSnapshot();
     const account = snapshot.channelAccounts.discord?.[DEFAULT_ACCOUNT_ID];
     expect(account?.running).toBe(false);
-    expect(account?.reconnectAttempts).toBe(10);
+    // Give-up records the attempt that exceeded MAX_RESTART_ATTEMPTS (10).
+    expect(account?.reconnectAttempts).toBe(11);
+    expect(account?.restartPending).toBe(false);
 
     await vi.advanceTimersByTimeAsync(200);
     expect(startAccount).toHaveBeenCalledTimes(11);
@@ -153,6 +158,101 @@ describe("server-channels auto restart", () => {
 
     await vi.advanceTimersByTimeAsync(200);
     expect(startAccount).toHaveBeenCalledTimes(1);
+  });
+
+  it("reconciles restartPending when restart backoff rejects without a manual stop", async () => {
+    // sleepWithAbort rejects when its abort races the backoff window. The old
+    // empty catch left restartPending=true forever with no task and green /ready.
+    const startAccount = vi.fn(async () => {});
+    installTestRegistry(createTestPlugin({ startAccount }));
+    const manager = createManager();
+    hoisted.sleepWithAbort.mockRejectedValueOnce(new Error("aborted"));
+
+    await manager.startChannels();
+    await vi.advanceTimersByTimeAsync(200);
+
+    expect(hoisted.sleepWithAbort).toHaveBeenCalled();
+    expect(startAccount).toHaveBeenCalledTimes(1);
+    const account = manager.getRuntimeSnapshot().channelAccounts.discord?.[DEFAULT_ACCOUNT_ID];
+    expect(account?.restartPending).toBe(false);
+    expect(account?.running).toBe(false);
+    expect(account?.lastError).toBe("aborted");
+  });
+
+  it("does not bind auto-restart backoff to the dying run abort signal", async () => {
+    let resolveSecond: (() => void) | undefined;
+    const secondStarted = new Promise<void>((resolve) => {
+      resolveSecond = resolve;
+    });
+    const runSignals: AbortSignal[] = [];
+    const startAccount = vi.fn(async (ctx: { abortSignal: AbortSignal }) => {
+      runSignals.push(ctx.abortSignal);
+      if (runSignals.length === 1) {
+        return;
+      }
+      await new Promise<void>((resolve) => {
+        resolveSecond?.();
+        ctx.abortSignal.addEventListener("abort", () => resolve(), { once: true });
+      });
+    });
+    installTestRegistry(createTestPlugin({ startAccount }));
+    const manager = createManager();
+
+    await manager.startChannels();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(hoisted.sleepWithAbort).toHaveBeenCalled();
+
+    const sleepSignal = hoisted.sleepWithAbort.mock.calls.at(-1)?.[1];
+    expect(runSignals[0]).toBeDefined();
+    expect(sleepSignal).toBeDefined();
+    expect(sleepSignal).not.toBe(runSignals[0]);
+
+    await vi.advanceTimersByTimeAsync(50);
+    await secondStarted;
+    expect(startAccount).toHaveBeenCalledTimes(2);
+    await manager.stopChannel("discord", DEFAULT_ACCOUNT_ID);
+  });
+
+  it("clears restartPending when startChannelInternal throws during restart", async () => {
+    const startAccount = vi.fn(async () => {});
+    installTestRegistry(createTestPlugin({ startAccount }));
+    let loadCount = 0;
+    const manager = createManager({
+      loadConfig: () => {
+        loadCount += 1;
+        // First start succeeds; the post-backoff restart reloads config and throws once.
+        if (loadCount === 2) {
+          const err = new Error("Invalid config") as Error & { code?: string };
+          err.code = "INVALID_CONFIG";
+          throw err;
+        }
+        return {};
+      },
+    });
+
+    await manager.startChannels();
+    await vi.advanceTimersByTimeAsync(200);
+
+    expect(startAccount).toHaveBeenCalledTimes(1);
+    expect(loadCount).toBeGreaterThanOrEqual(2);
+    const account = manager.getRuntimeSnapshot().channelAccounts.discord?.[DEFAULT_ACCOUNT_ID];
+    expect(account?.restartPending).toBe(false);
+    expect(account?.running).toBe(false);
+    expect(account?.lastError).toMatch(/Invalid config/);
+  });
+
+  it("clears running when startAccount throws synchronously", async () => {
+    const startAccount = vi.fn(() => {
+      throw new Error("sync start boom");
+    });
+    installTestRegistry(createTestPlugin({ startAccount }));
+    const manager = createManager();
+
+    await manager.startChannels();
+    const account = manager.getRuntimeSnapshot().channelAccounts.discord?.[DEFAULT_ACCOUNT_ID];
+    expect(account?.running).toBe(false);
+    expect(account?.restartPending).toBe(false);
+    expect(account?.lastError).toBe("sync start boom");
   });
 
   it("marks enabled/configured when account descriptors omit them", () => {
