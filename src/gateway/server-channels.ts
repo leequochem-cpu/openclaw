@@ -212,29 +212,45 @@ export function createChannelManager(opts: ChannelManagerOptions): ChannelManage
         if (!preserveRestartAttempts) {
           restartAttempts.delete(rKey);
         }
-        setRuntime(channelId, id, {
-          accountId: id,
-          enabled: true,
-          configured: true,
-          running: true,
-          restartPending: false,
-          lastStartAt: Date.now(),
-          lastError: null,
-          reconnectAttempts: preserveRestartAttempts ? (restartAttempts.get(rKey) ?? 0) : 0,
-        });
-
         const log = channelLogs[channelId];
-        const task = startAccount({
-          cfg,
-          accountId: id,
-          account,
-          runtime: channelRuntimeEnvs[channelId],
-          abortSignal: abort.signal,
-          log,
-          getStatus: () => getRuntime(channelId, id),
-          setStatus: (next) => setRuntime(channelId, id, next),
-          ...(channelRuntime ? { channelRuntime } : {}),
-        });
+        let task: unknown;
+        try {
+          setRuntime(channelId, id, {
+            accountId: id,
+            enabled: true,
+            configured: true,
+            running: true,
+            restartPending: false,
+            lastStartAt: Date.now(),
+            lastError: null,
+            reconnectAttempts: preserveRestartAttempts ? (restartAttempts.get(rKey) ?? 0) : 0,
+          });
+          task = startAccount({
+            cfg,
+            accountId: id,
+            account,
+            runtime: channelRuntimeEnvs[channelId],
+            abortSignal: abort.signal,
+            log,
+            getStatus: () => getRuntime(channelId, id),
+            setStatus: (next) => setRuntime(channelId, id, next),
+            ...(channelRuntime ? { channelRuntime } : {}),
+          });
+        } catch (err) {
+          // Sync startAccount failure after setRuntime(running:true) would otherwise
+          // leave a zombie account with no task and no restart chain.
+          const message = formatErrorMessage(err);
+          store.aborts.delete(id);
+          setRuntime(channelId, id, {
+            accountId: id,
+            running: false,
+            restartPending: false,
+            lastError: message,
+            lastStopAt: Date.now(),
+          });
+          log.error?.(`[${id}] channel start failed: ${message}`);
+          return;
+        }
         const trackedPromise = Promise.resolve(task)
           .catch((err) => {
             const message = formatErrorMessage(err);
@@ -272,23 +288,47 @@ export function createChannelManager(opts: ChannelManagerOptions): ChannelManage
               restartPending: true,
               reconnectAttempts: attempt,
             });
+            // Restart backoff must not share the dying run's abort signal.
+            // Provider/runtime teardown can abort that signal and would otherwise
+            // cancel the handoff; stopChannel cancels this restart-owned controller.
+            const restartAbort = new AbortController();
+            store.aborts.set(id, restartAbort);
             try {
-              await sleepWithAbort(delayMs, abort.signal);
-              if (manuallyStopped.has(rKey)) {
+              await sleepWithAbort(delayMs, restartAbort.signal);
+              if (manuallyStopped.has(rKey) || restartAbort.signal.aborted) {
+                setRuntime(channelId, id, {
+                  accountId: id,
+                  restartPending: false,
+                  reconnectAttempts: attempt,
+                });
                 return;
               }
               if (store.tasks.get(id) === trackedPromise) {
                 store.tasks.delete(id);
               }
-              if (store.aborts.get(id) === abort) {
+              if (store.aborts.get(id) === restartAbort) {
                 store.aborts.delete(id);
               }
               await startChannelInternal(channelId, id, {
                 preserveRestartAttempts: true,
                 preserveManualStop: true,
               });
-            } catch {
-              // abort or startup failure — next crash will retry
+            } catch (error) {
+              // Restart sleep rejected or startChannelInternal threw. This task
+              // will not schedule another attempt — never leave restartPending
+              // advertising a restart that will never arrive (green /ready while
+              // the channel is permanently down).
+              const intentionalStop = manuallyStopped.has(rKey) || restartAbort.signal.aborted;
+              const lastError = formatErrorMessage(error);
+              if (!intentionalStop) {
+                log.error?.(`[${id}] auto-restart failed: ${lastError}`);
+              }
+              setRuntime(channelId, id, {
+                accountId: id,
+                restartPending: false,
+                reconnectAttempts: attempt,
+                ...(intentionalStop ? {} : { lastError }),
+              });
             }
           })
           .finally(() => {
