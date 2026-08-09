@@ -135,7 +135,9 @@ describe("server-channels auto restart", () => {
     const snapshot = manager.getRuntimeSnapshot();
     const account = snapshot.channelAccounts.discord?.[DEFAULT_ACCOUNT_ID];
     expect(account?.running).toBe(false);
-    expect(account?.reconnectAttempts).toBe(10);
+    // Give-up records the attempt that exceeded MAX_RESTART_ATTEMPTS (10).
+    expect(account?.reconnectAttempts).toBe(11);
+    expect(account?.restartPending).toBe(false);
 
     await vi.advanceTimersByTimeAsync(200);
     expect(startAccount).toHaveBeenCalledTimes(11);
@@ -178,9 +180,20 @@ describe("server-channels auto restart", () => {
   });
 
   it("does not bind auto-restart backoff to the dying run abort signal", async () => {
+    let resolveSecond: (() => void) | undefined;
+    const secondStarted = new Promise<void>((resolve) => {
+      resolveSecond = resolve;
+    });
     const runSignals: AbortSignal[] = [];
     const startAccount = vi.fn(async (ctx: { abortSignal: AbortSignal }) => {
       runSignals.push(ctx.abortSignal);
+      if (runSignals.length === 1) {
+        return;
+      }
+      await new Promise<void>((resolve) => {
+        resolveSecond?.();
+        ctx.abortSignal.addEventListener("abort", () => resolve(), { once: true });
+      });
     });
     installTestRegistry(createTestPlugin({ startAccount }));
     const manager = createManager();
@@ -194,8 +207,10 @@ describe("server-channels auto restart", () => {
     expect(sleepSignal).toBeDefined();
     expect(sleepSignal).not.toBe(runSignals[0]);
 
-    await vi.advanceTimersByTimeAsync(200);
+    await vi.advanceTimersByTimeAsync(50);
+    await secondStarted;
     expect(startAccount).toHaveBeenCalledTimes(2);
+    await manager.stopChannel("discord", DEFAULT_ACCOUNT_ID);
   });
 
   it("clears restartPending when startChannelInternal throws during restart", async () => {
