@@ -369,7 +369,7 @@ describe("startGatewayConfigReloader", () => {
   it("keeps the previous baseline after hot-reload failure so the same config can retry", async () => {
     const nextConfig = {
       gateway: { reload: { debounceMs: 0 } },
-      channels: { telegram: { botToken: "new-token" } },
+      hooks: { enabled: true },
     };
     const readSnapshot = vi.fn<() => Promise<ConfigFileSnapshot>>().mockResolvedValue(
       makeSnapshot({
