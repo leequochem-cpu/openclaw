@@ -355,6 +355,7 @@ Docs: https://docs.openclaw.ai
 - Control UI/Telegram sender labels: preserve inbound sender labels in sanitized chat history so dashboard user-message groups split correctly and show real group-member names instead of `You`. (#39414) Thanks @obviyus.
 - Gateway/WhatsApp QR login restore: restart the stopped web channel after failed, cancelled, or timed-out QR login so `manuallyStopped` does not leave WhatsApp permanently dead and dropping messages.
 - Gateway/config hot reload: keep the previous reloader baseline until a hot apply succeeds, isolate per-channel restart failures, and retry bounded apply failures so a failed channel restart cannot desync runtime secrets from on-disk config and strand stopped channels.
+- Mattermost/interactive buttons: enforce `dmPolicy`/`groupPolicy`/allowlists on generic button callbacks before system-event enqueue or synthetic inbound dispatch, closing an HMAC-only bypass that let unauthorized channel members trigger agent turns.
 
 ## 2026.3.2
 
