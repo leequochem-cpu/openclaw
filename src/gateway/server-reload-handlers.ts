@@ -120,13 +120,26 @@ export function createGatewayReloadHandlers(params: {
           "skipping channel reload (OPENCLAW_SKIP_CHANNELS=1 or OPENCLAW_SKIP_PROVIDERS=1)",
         );
       } else {
+        const failedChannels: ChannelKind[] = [];
         const restartChannel = async (name: ChannelKind) => {
           params.logChannels.info(`restarting ${name} channel`);
-          await params.stopChannel(name);
-          await params.startChannel(name);
+          try {
+            await params.stopChannel(name);
+            await params.startChannel(name);
+          } catch (err) {
+            failedChannels.push(name);
+            params.logChannels.error(
+              `failed to restart ${name} channel during hot reload: ${String(err instanceof Error ? err.message : err)}`,
+            );
+          }
         };
         for (const channel of plan.restartChannels) {
           await restartChannel(channel);
+        }
+        if (failedChannels.length > 0) {
+          throw new Error(
+            `failed to restart channels during hot reload: ${failedChannels.join(", ")}`,
+          );
         }
       }
     }

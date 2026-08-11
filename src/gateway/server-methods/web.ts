@@ -1,4 +1,5 @@
 import { listChannelPlugins } from "../../channels/plugins/index.js";
+import type { ChannelId } from "../../channels/plugins/types.js";
 import {
   ErrorCodes,
   errorShape,
@@ -38,6 +39,21 @@ function respondProviderUnsupported(respond: RespondFn, providerId: string) {
   );
 }
 
+async function restartWebLoginChannel(params: {
+  startChannel: (channelId: ChannelId, accountId?: string) => Promise<void>;
+  channelId: ChannelId;
+  accountId?: string;
+}): Promise<void> {
+  // stopChannel marks accounts manuallyStopped; always clear that latch on
+  // failed/cancelled QR login so health-monitor/auto-start can recover, and so
+  // an existing linked session is brought back online instead of staying dead.
+  try {
+    await params.startChannel(params.channelId, params.accountId);
+  } catch {
+    // Best-effort restore; the original login error is what we surface.
+  }
+}
+
 export const webHandlers: GatewayRequestHandlers = {
   "web.login.start": async ({ params, respond, context }) => {
     if (!validateWebLoginStartParams(params)) {
@@ -51,15 +67,22 @@ export const webHandlers: GatewayRequestHandlers = {
       );
       return;
     }
+    const accountId = resolveAccountId(params);
+    const provider = resolveWebLoginProvider();
+    if (!provider) {
+      respondProviderUnavailable(respond);
+      return;
+    }
+    let stopped = false;
     try {
-      const accountId = resolveAccountId(params);
-      const provider = resolveWebLoginProvider();
-      if (!provider) {
-        respondProviderUnavailable(respond);
-        return;
-      }
       await context.stopChannel(provider.id, accountId);
+      stopped = true;
       if (!provider.gateway?.loginWithQrStart) {
+        await restartWebLoginChannel({
+          startChannel: context.startChannel,
+          channelId: provider.id,
+          accountId,
+        });
         respondProviderUnsupported(respond, provider.id);
         return;
       }
@@ -74,6 +97,13 @@ export const webHandlers: GatewayRequestHandlers = {
       });
       respond(true, result, undefined);
     } catch (err) {
+      if (stopped) {
+        await restartWebLoginChannel({
+          startChannel: context.startChannel,
+          channelId: provider.id,
+          accountId,
+        });
+      }
       respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, formatForLog(err)));
     }
   },
@@ -89,17 +119,17 @@ export const webHandlers: GatewayRequestHandlers = {
       );
       return;
     }
+    const accountId = resolveAccountId(params);
+    const provider = resolveWebLoginProvider();
+    if (!provider) {
+      respondProviderUnavailable(respond);
+      return;
+    }
+    if (!provider.gateway?.loginWithQrWait) {
+      respondProviderUnsupported(respond, provider.id);
+      return;
+    }
     try {
-      const accountId = resolveAccountId(params);
-      const provider = resolveWebLoginProvider();
-      if (!provider) {
-        respondProviderUnavailable(respond);
-        return;
-      }
-      if (!provider.gateway?.loginWithQrWait) {
-        respondProviderUnsupported(respond, provider.id);
-        return;
-      }
       const result = await provider.gateway.loginWithQrWait({
         timeoutMs:
           typeof (params as { timeoutMs?: unknown }).timeoutMs === "number"
@@ -107,11 +137,21 @@ export const webHandlers: GatewayRequestHandlers = {
             : undefined,
         accountId,
       });
-      if (result.connected) {
-        await context.startChannel(provider.id, accountId);
-      }
+      // Always restart after wait settles. On success this picks up the new
+      // session; on timeout/cancel/failure it clears manuallyStopped and
+      // restores any previously linked session instead of leaving WhatsApp dead.
+      await restartWebLoginChannel({
+        startChannel: context.startChannel,
+        channelId: provider.id,
+        accountId,
+      });
       respond(true, result, undefined);
     } catch (err) {
+      await restartWebLoginChannel({
+        startChannel: context.startChannel,
+        channelId: provider.id,
+        accountId,
+      });
       respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, formatForLog(err)));
     }
   },
