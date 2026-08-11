@@ -366,6 +366,40 @@ describe("startGatewayConfigReloader", () => {
     await reloader.stop();
   });
 
+  it("keeps the previous baseline after hot-reload failure so the same config can retry", async () => {
+    const nextConfig = {
+      gateway: { reload: { debounceMs: 0 } },
+      hooks: { enabled: true },
+    };
+    const readSnapshot = vi.fn<() => Promise<ConfigFileSnapshot>>().mockResolvedValue(
+      makeSnapshot({
+        config: nextConfig,
+        hash: "hot-fail-1",
+      }),
+    );
+    const { watcher, onHotReload, log, reloader } = createReloaderHarness(readSnapshot);
+    onHotReload.mockRejectedValue(
+      new Error("failed to restart channels during hot reload: telegram"),
+    );
+
+    watcher.emit("change");
+    await vi.runOnlyPendingTimersAsync();
+    await Promise.resolve();
+
+    expect(onHotReload).toHaveBeenCalledTimes(1);
+    expect(log.error).toHaveBeenCalledWith(
+      "config reload failed: Error: failed to restart channels during hot reload: telegram",
+    );
+    expect(log.warn).toHaveBeenCalledWith("config reload retry (1/3) after apply failure");
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    await Promise.resolve();
+
+    expect(onHotReload).toHaveBeenCalledTimes(2);
+
+    await reloader.stop();
+  });
+
   it("contains restart callback failures and retries on subsequent changes", async () => {
     const readSnapshot = vi
       .fn<() => Promise<ConfigFileSnapshot>>()

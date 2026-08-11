@@ -391,6 +391,15 @@ export function createMattermostInteractionHandler(params: {
   trustedProxies?: string[];
   allowRealIpFallback?: boolean;
   resolveSessionKey?: (channelId: string, userId: string) => Promise<string>;
+  /**
+   * Optional DM/group policy gate for generic button clicks (system event +
+   * synthetic inbound turn). Model-picker handlers authorize separately.
+   */
+  authorizeInteraction?: (opts: {
+    channelId: string;
+    userId: string;
+    userName: string;
+  }) => Promise<{ ok: boolean; reason?: string }>;
   handleInteraction?: (opts: {
     payload: MattermostInteractionPayload;
     userName: string;
@@ -576,6 +585,24 @@ export function createMattermostInteractionHandler(params: {
         res.statusCode = 500;
         res.setHeader("Content-Type", "application/json");
         res.end(JSON.stringify({ error: "Interaction handler failed" }));
+        return;
+      }
+    }
+
+    // Match message/reaction/slash policy before any agent-facing side effects.
+    if (params.authorizeInteraction) {
+      const auth = await params.authorizeInteraction({
+        channelId: payload.channel_id,
+        userId: payload.user_id,
+        userName,
+      });
+      if (!auth.ok) {
+        log?.(
+          `mattermost interaction: drop action=${actionId} user=${payload.user_id} channel=${payload.channel_id} reason=${auth.reason ?? "unauthorized"}`,
+        );
+        res.statusCode = 403;
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ error: "Unauthorized" }));
         return;
       }
     }

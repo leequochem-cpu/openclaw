@@ -502,6 +502,19 @@ describe("createMattermostInteractionHandler", () => {
     trustedProxies?: string[];
     remoteAddress?: string;
     headers?: Record<string, string>;
+    authorizeInteraction?: (opts: {
+      channelId: string;
+      userId: string;
+      userName: string;
+    }) => Promise<{ ok: boolean; reason?: string }>;
+    dispatchButtonClick?: (opts: {
+      channelId: string;
+      userId: string;
+      userName: string;
+      actionId: string;
+      actionName: string;
+      postId: string;
+    }) => Promise<void>;
   }) {
     const context = { action_id: "approve", __openclaw_channel_id: "chan-1" };
     const token = generateInteractionToken(context, "acct");
@@ -528,6 +541,8 @@ describe("createMattermostInteractionHandler", () => {
       accountId: "acct",
       allowedSourceIps: params?.allowedSourceIps,
       trustedProxies: params?.trustedProxies,
+      authorizeInteraction: params?.authorizeInteraction,
+      dispatchButtonClick: params?.dispatchButtonClick,
     });
 
     const req = createReq({
@@ -736,6 +751,50 @@ describe("createMattermostInteractionHandler", () => {
       { path: "/posts/post-1", method: undefined },
       { path: "/posts/post-1", method: "PUT" },
     ]);
+  });
+
+  it("rejects generic button clicks when authorizeInteraction denies access", async () => {
+    const dispatchButtonClick = vi.fn();
+    const enqueueSystemEvent = vi.fn();
+    setMattermostRuntime({
+      system: { enqueueSystemEvent },
+    } as unknown as Parameters<typeof setMattermostRuntime>[0]);
+
+    const { res, requestLog } = await runApproveInteraction({
+      authorizeInteraction: async () => ({ ok: false, reason: "group-policy-disabled" }),
+      dispatchButtonClick,
+    });
+
+    expect(res.statusCode).toBe(403);
+    expect(res.body).toContain("Unauthorized");
+    expect(dispatchButtonClick).not.toHaveBeenCalled();
+    expect(enqueueSystemEvent).not.toHaveBeenCalled();
+    // Only the initial post validation fetch — no completion update.
+    expect(requestLog).toEqual([{ path: "/posts/post-1", method: undefined }]);
+  });
+
+  it("dispatches generic button clicks when authorizeInteraction allows access", async () => {
+    const dispatchButtonClick = vi.fn();
+    const authorizeInteraction = vi.fn().mockResolvedValue({ ok: true });
+
+    const { res } = await runApproveInteraction({
+      authorizeInteraction,
+      dispatchButtonClick,
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(authorizeInteraction).toHaveBeenCalledWith({
+      channelId: "chan-1",
+      userId: "user-1",
+      userName: "alice",
+    });
+    expect(dispatchButtonClick).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: "chan-1",
+        userId: "user-1",
+        actionId: "approve",
+      }),
+    );
   });
 
   it("lets a custom interaction handler short-circuit generic completion updates", async () => {

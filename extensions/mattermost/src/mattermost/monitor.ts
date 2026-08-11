@@ -518,6 +518,50 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
       trustedProxies: cfg.gateway?.trustedProxies,
       allowRealIpFallback: cfg.gateway?.allowRealIpFallback === true,
       handleInteraction: handleModelPickerInteraction,
+      // Generic button clicks previously skipped DM/group policy (HMAC-only).
+      // Align with message/reaction ingress so groupPolicy/dmPolicy cannot be bypassed.
+      authorizeInteraction: async ({ channelId, userId, userName }) => {
+        const channelInfo = await resolveChannelInfo(channelId);
+        if (!channelInfo?.type) {
+          return { ok: false, reason: "unknown-channel" };
+        }
+        const kind = mapMattermostChannelTypeToChatType(channelInfo.type);
+        const dmPolicy = account.config.dmPolicy ?? "pairing";
+        // Resolve policy locally so this callback does not depend on later
+        // const bindings declared after HTTP route registration.
+        const { groupPolicy: interactionGroupPolicy } = resolveAllowlistProviderRuntimeGroupPolicy({
+          providerConfigPresent: cfg.channels?.mattermost !== undefined,
+          groupPolicy: account.config.groupPolicy,
+          defaultGroupPolicy: resolveDefaultGroupPolicy(cfg),
+        });
+        const storeAllowFrom = normalizeMattermostAllowList(
+          await readStoreAllowFromForDmPolicy({
+            provider: "mattermost",
+            accountId: account.accountId,
+            dmPolicy,
+            readStore: pairing.readStoreForDmPolicy,
+          }),
+        );
+        const access = resolveDmGroupAccessWithLists({
+          isGroup: kind !== "direct",
+          dmPolicy,
+          groupPolicy: interactionGroupPolicy,
+          allowFrom: normalizeMattermostAllowList(account.config.allowFrom ?? []),
+          groupAllowFrom: normalizeMattermostAllowList(account.config.groupAllowFrom ?? []),
+          storeAllowFrom,
+          isSenderAllowed: (allowFrom) =>
+            isMattermostSenderAllowed({
+              senderId: userId,
+              senderName: userName,
+              allowFrom,
+              allowNameMatching,
+            }),
+        });
+        if (access.decision !== "allow") {
+          return { ok: false, reason: access.reason };
+        }
+        return { ok: true };
+      },
       resolveSessionKey: async (channelId: string, userId: string) => {
         const channelInfo = await resolveChannelInfo(channelId);
         const kind = mapMattermostChannelTypeToChatType(channelInfo?.type);
