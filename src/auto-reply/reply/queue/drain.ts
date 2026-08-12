@@ -30,6 +30,17 @@ export function kickFollowupDrainIfIdle(key: string): void {
   scheduleFollowupDrain(key, cb);
 }
 
+/**
+ * Register the drain callback without starting work.
+ * Used by heartbeat runs so transcript prune can finish before followups write.
+ */
+export function armFollowupDrainCallback(
+  key: string,
+  runFollowup: (run: FollowupRun) => Promise<void>,
+): void {
+  FOLLOWUP_RUN_CALLBACKS.set(key, runFollowup);
+}
+
 type OriginRoutingMetadata = Pick<
   FollowupRun,
   "originatingChannel" | "originatingTo" | "originatingAccountId" | "originatingThreadId"

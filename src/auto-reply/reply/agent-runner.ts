@@ -365,7 +365,9 @@ export async function runReplyAgent(params: {
     });
 
     if (runOutcome.kind === "final") {
-      return finalizeWithFollowup(runOutcome.payload, queueKey, runFollowupTurn);
+      return finalizeWithFollowup(runOutcome.payload, queueKey, runFollowupTurn, {
+        deferDrain: isHeartbeat,
+      });
     }
 
     const {
@@ -478,7 +480,9 @@ export async function runReplyAgent(params: {
     // Otherwise, a late typing trigger (e.g. from a tool callback) can outlive the run and
     // keep the typing indicator stuck.
     if (payloadArray.length === 0) {
-      return finalizeWithFollowup(undefined, queueKey, runFollowupTurn);
+      return finalizeWithFollowup(undefined, queueKey, runFollowupTurn, {
+        deferDrain: isHeartbeat,
+      });
     }
 
     const payloadResult = await buildReplyPayloads({
@@ -507,7 +511,9 @@ export async function runReplyAgent(params: {
     didLogHeartbeatStrip = payloadResult.didLogHeartbeatStrip;
 
     if (replyPayloads.length === 0) {
-      return finalizeWithFollowup(undefined, queueKey, runFollowupTurn);
+      return finalizeWithFollowup(undefined, queueKey, runFollowupTurn, {
+        deferDrain: isHeartbeat,
+      });
     }
 
     const successfulCronAdds = runResult.successfulCronAdds ?? 0;
@@ -700,11 +706,14 @@ export async function runReplyAgent(params: {
       finalPayloads.length === 1 ? finalPayloads[0] : finalPayloads,
       queueKey,
       runFollowupTurn,
+      { deferDrain: isHeartbeat },
     );
   } catch (error) {
     // Keep the followup queue moving even when an unexpected exception escapes
     // the run path; the caller still receives the original error.
-    finalizeWithFollowup(undefined, queueKey, runFollowupTurn);
+    finalizeWithFollowup(undefined, queueKey, runFollowupTurn, {
+      deferDrain: isHeartbeat,
+    });
     throw error;
   } finally {
     blockReplyPipeline?.stop();

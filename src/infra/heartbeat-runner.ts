@@ -7,6 +7,7 @@ import {
 } from "../agents/agent-scope.js";
 import { appendCronStyleCurrentTimeLine } from "../agents/current-time.js";
 import { resolveEffectiveMessagesConfig } from "../agents/identity.js";
+import { acquireSessionWriteLock } from "../agents/session-write-lock.js";
 import { DEFAULT_HEARTBEAT_FILENAME } from "../agents/workspace.js";
 import { resolveHeartbeatReplyPayload } from "../auto-reply/heartbeat-reply-payload.js";
 import {
@@ -17,6 +18,7 @@ import {
   stripHeartbeatToken,
 } from "../auto-reply/heartbeat.js";
 import { getReplyFromConfig } from "../auto-reply/reply.js";
+import { kickFollowupDrainIfIdle } from "../auto-reply/reply/queue.js";
 import { HEARTBEAT_TOKEN } from "../auto-reply/tokens.js";
 import type { ReplyPayload } from "../auto-reply/types.js";
 import { getChannelPlugin } from "../channels/plugins/index.js";
@@ -31,8 +33,8 @@ import {
   resolveAgentMainSessionKey,
   resolveSessionFilePath,
   resolveStorePath,
-  saveSessionStore,
   updateSessionStore,
+  updateSessionStoreEntry,
 } from "../config/sessions.js";
 import type { AgentDefaultsConfig } from "../config/types.agent-defaults.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
@@ -377,6 +379,9 @@ async function restoreHeartbeatUpdatedAt(params: {
  * Prune heartbeat transcript entries by truncating the file back to a previous size.
  * This removes the user+assistant turns that were written during a HEARTBEAT_OK run,
  * preventing context pollution from zero-information exchanges.
+ *
+ * Callers must defer followup queue drains until after this returns so concurrent
+ * session writers cannot append bytes that would then be wiped by truncate.
  */
 async function pruneHeartbeatTranscript(params: {
   transcriptPath?: string;
@@ -386,7 +391,15 @@ async function pruneHeartbeatTranscript(params: {
   if (!transcriptPath || typeof preHeartbeatSize !== "number" || preHeartbeatSize < 0) {
     return;
   }
+  let release: (() => Promise<void>) | undefined;
   try {
+    // Exclusive lock: serialize against embedded runs / followups that take the
+    // same session write lock before appending transcript bytes.
+    const lock = await acquireSessionWriteLock({
+      sessionFile: transcriptPath,
+      allowReentrant: false,
+    });
+    release = lock.release;
     const stat = await fs.stat(transcriptPath);
     // Only truncate if the file has grown during the heartbeat run
     if (stat.size > preHeartbeatSize) {
@@ -394,6 +407,8 @@ async function pruneHeartbeatTranscript(params: {
     }
   } catch {
     // File may not exist or may have been removed - ignore errors
+  } finally {
+    await release?.();
   }
 }
 
@@ -769,221 +784,228 @@ export async function runHeartbeatOnce(opts: {
           bootstrapContextMode,
         }
       : { isHeartbeat: true, suppressToolErrorWarnings, bootstrapContextMode };
-    const replyResult = await getReplyFromConfig(ctx, replyOpts, cfg);
-    const replyPayload = resolveHeartbeatReplyPayload(replyResult);
-    const includeReasoning = heartbeat?.includeReasoning === true;
-    const reasoningPayloads = includeReasoning
-      ? resolveHeartbeatReasoningPayloads(replyResult).filter((payload) => payload !== replyPayload)
-      : [];
+    try {
+      const replyResult = await getReplyFromConfig(ctx, replyOpts, cfg);
+      const replyPayload = resolveHeartbeatReplyPayload(replyResult);
+      const includeReasoning = heartbeat?.includeReasoning === true;
+      const reasoningPayloads = includeReasoning
+        ? resolveHeartbeatReasoningPayloads(replyResult).filter(
+            (payload) => payload !== replyPayload,
+          )
+        : [];
 
-    if (
-      !replyPayload ||
-      (!replyPayload.text && !replyPayload.mediaUrl && !replyPayload.mediaUrls?.length)
-    ) {
-      await restoreHeartbeatUpdatedAt({
-        storePath,
-        sessionKey,
-        updatedAt: previousUpdatedAt,
-      });
-      // Prune the transcript to remove HEARTBEAT_OK turns
-      await pruneHeartbeatTranscript(transcriptState);
-      const okSent = await maybeSendHeartbeatOk();
-      emitHeartbeatEvent({
-        status: "ok-empty",
-        reason: opts.reason,
-        durationMs: Date.now() - startedAt,
-        channel: delivery.channel !== "none" ? delivery.channel : undefined,
-        accountId: delivery.accountId,
-        silent: !okSent,
-        indicatorType: visibility.useIndicator ? resolveIndicatorType("ok-empty") : undefined,
-      });
-      return { status: "ran", durationMs: Date.now() - startedAt };
-    }
+      if (
+        !replyPayload ||
+        (!replyPayload.text && !replyPayload.mediaUrl && !replyPayload.mediaUrls?.length)
+      ) {
+        await restoreHeartbeatUpdatedAt({
+          storePath,
+          sessionKey,
+          updatedAt: previousUpdatedAt,
+        });
+        // Prune the transcript to remove HEARTBEAT_OK turns
+        await pruneHeartbeatTranscript(transcriptState);
+        const okSent = await maybeSendHeartbeatOk();
+        emitHeartbeatEvent({
+          status: "ok-empty",
+          reason: opts.reason,
+          durationMs: Date.now() - startedAt,
+          channel: delivery.channel !== "none" ? delivery.channel : undefined,
+          accountId: delivery.accountId,
+          silent: !okSent,
+          indicatorType: visibility.useIndicator ? resolveIndicatorType("ok-empty") : undefined,
+        });
+        return { status: "ran", durationMs: Date.now() - startedAt };
+      }
 
-    const ackMaxChars = resolveHeartbeatAckMaxChars(cfg, heartbeat);
-    const normalized = normalizeHeartbeatReply(replyPayload, responsePrefix, ackMaxChars);
-    // For exec completion events, don't skip even if the response looks like HEARTBEAT_OK.
-    // The model should be responding with exec results, not ack tokens.
-    // Also, if normalized.text is empty due to token stripping but we have exec completion,
-    // fall back to the original reply text.
-    const execFallbackText =
-      hasExecCompletion && !normalized.text.trim() && replyPayload.text?.trim()
-        ? replyPayload.text.trim()
-        : null;
-    if (execFallbackText) {
-      normalized.text = execFallbackText;
-      normalized.shouldSkip = false;
-    }
-    const shouldSkipMain = normalized.shouldSkip && !normalized.hasMedia && !hasExecCompletion;
-    if (shouldSkipMain && reasoningPayloads.length === 0) {
-      await restoreHeartbeatUpdatedAt({
-        storePath,
-        sessionKey,
-        updatedAt: previousUpdatedAt,
-      });
-      // Prune the transcript to remove HEARTBEAT_OK turns
-      await pruneHeartbeatTranscript(transcriptState);
-      const okSent = await maybeSendHeartbeatOk();
-      emitHeartbeatEvent({
-        status: "ok-token",
-        reason: opts.reason,
-        durationMs: Date.now() - startedAt,
-        channel: delivery.channel !== "none" ? delivery.channel : undefined,
-        accountId: delivery.accountId,
-        silent: !okSent,
-        indicatorType: visibility.useIndicator ? resolveIndicatorType("ok-token") : undefined,
-      });
-      return { status: "ran", durationMs: Date.now() - startedAt };
-    }
+      const ackMaxChars = resolveHeartbeatAckMaxChars(cfg, heartbeat);
+      const normalized = normalizeHeartbeatReply(replyPayload, responsePrefix, ackMaxChars);
+      // For exec completion events, don't skip even if the response looks like HEARTBEAT_OK.
+      // The model should be responding with exec results, not ack tokens.
+      // Also, if normalized.text is empty due to token stripping but we have exec completion,
+      // fall back to the original reply text.
+      const execFallbackText =
+        hasExecCompletion && !normalized.text.trim() && replyPayload.text?.trim()
+          ? replyPayload.text.trim()
+          : null;
+      if (execFallbackText) {
+        normalized.text = execFallbackText;
+        normalized.shouldSkip = false;
+      }
+      const shouldSkipMain = normalized.shouldSkip && !normalized.hasMedia && !hasExecCompletion;
+      if (shouldSkipMain && reasoningPayloads.length === 0) {
+        await restoreHeartbeatUpdatedAt({
+          storePath,
+          sessionKey,
+          updatedAt: previousUpdatedAt,
+        });
+        // Prune the transcript to remove HEARTBEAT_OK turns
+        await pruneHeartbeatTranscript(transcriptState);
+        const okSent = await maybeSendHeartbeatOk();
+        emitHeartbeatEvent({
+          status: "ok-token",
+          reason: opts.reason,
+          durationMs: Date.now() - startedAt,
+          channel: delivery.channel !== "none" ? delivery.channel : undefined,
+          accountId: delivery.accountId,
+          silent: !okSent,
+          indicatorType: visibility.useIndicator ? resolveIndicatorType("ok-token") : undefined,
+        });
+        return { status: "ran", durationMs: Date.now() - startedAt };
+      }
 
-    const mediaUrls =
-      replyPayload.mediaUrls ?? (replyPayload.mediaUrl ? [replyPayload.mediaUrl] : []);
+      const mediaUrls =
+        replyPayload.mediaUrls ?? (replyPayload.mediaUrl ? [replyPayload.mediaUrl] : []);
 
-    // Suppress duplicate heartbeats (same payload) within a short window.
-    // This prevents "nagging" when nothing changed but the model repeats the same items.
-    const prevHeartbeatText =
-      typeof entry?.lastHeartbeatText === "string" ? entry.lastHeartbeatText : "";
-    const prevHeartbeatAt =
-      typeof entry?.lastHeartbeatSentAt === "number" ? entry.lastHeartbeatSentAt : undefined;
-    const isDuplicateMain =
-      !shouldSkipMain &&
-      !mediaUrls.length &&
-      Boolean(prevHeartbeatText.trim()) &&
-      normalized.text.trim() === prevHeartbeatText.trim() &&
-      typeof prevHeartbeatAt === "number" &&
-      startedAt - prevHeartbeatAt < 24 * 60 * 60 * 1000;
+      // Suppress duplicate heartbeats (same payload) within a short window.
+      // This prevents "nagging" when nothing changed but the model repeats the same items.
+      const prevHeartbeatText =
+        typeof entry?.lastHeartbeatText === "string" ? entry.lastHeartbeatText : "";
+      const prevHeartbeatAt =
+        typeof entry?.lastHeartbeatSentAt === "number" ? entry.lastHeartbeatSentAt : undefined;
+      const isDuplicateMain =
+        !shouldSkipMain &&
+        !mediaUrls.length &&
+        Boolean(prevHeartbeatText.trim()) &&
+        normalized.text.trim() === prevHeartbeatText.trim() &&
+        typeof prevHeartbeatAt === "number" &&
+        startedAt - prevHeartbeatAt < 24 * 60 * 60 * 1000;
 
-    if (isDuplicateMain) {
-      await restoreHeartbeatUpdatedAt({
-        storePath,
-        sessionKey,
-        updatedAt: previousUpdatedAt,
-      });
-      // Prune the transcript to remove duplicate heartbeat turns
-      await pruneHeartbeatTranscript(transcriptState);
-      emitHeartbeatEvent({
-        status: "skipped",
-        reason: "duplicate",
-        preview: normalized.text.slice(0, 200),
-        durationMs: Date.now() - startedAt,
-        hasMedia: false,
-        channel: delivery.channel !== "none" ? delivery.channel : undefined,
-        accountId: delivery.accountId,
-      });
-      return { status: "ran", durationMs: Date.now() - startedAt };
-    }
+      if (isDuplicateMain) {
+        await restoreHeartbeatUpdatedAt({
+          storePath,
+          sessionKey,
+          updatedAt: previousUpdatedAt,
+        });
+        // Prune the transcript to remove duplicate heartbeat turns
+        await pruneHeartbeatTranscript(transcriptState);
+        emitHeartbeatEvent({
+          status: "skipped",
+          reason: "duplicate",
+          preview: normalized.text.slice(0, 200),
+          durationMs: Date.now() - startedAt,
+          hasMedia: false,
+          channel: delivery.channel !== "none" ? delivery.channel : undefined,
+          accountId: delivery.accountId,
+        });
+        return { status: "ran", durationMs: Date.now() - startedAt };
+      }
 
-    // Reasoning payloads are text-only; any attachments stay on the main reply.
-    const previewText = shouldSkipMain
-      ? reasoningPayloads
-          .map((payload) => payload.text)
-          .filter((text): text is string => Boolean(text?.trim()))
-          .join("\n")
-      : normalized.text;
+      // Reasoning payloads are text-only; any attachments stay on the main reply.
+      const previewText = shouldSkipMain
+        ? reasoningPayloads
+            .map((payload) => payload.text)
+            .filter((text): text is string => Boolean(text?.trim()))
+            .join("\n")
+        : normalized.text;
 
-    if (delivery.channel === "none" || !delivery.to) {
-      emitHeartbeatEvent({
-        status: "skipped",
-        reason: delivery.reason ?? "no-target",
-        preview: previewText?.slice(0, 200),
-        durationMs: Date.now() - startedAt,
-        hasMedia: mediaUrls.length > 0,
-        accountId: delivery.accountId,
-      });
-      return { status: "ran", durationMs: Date.now() - startedAt };
-    }
+      if (delivery.channel === "none" || !delivery.to) {
+        emitHeartbeatEvent({
+          status: "skipped",
+          reason: delivery.reason ?? "no-target",
+          preview: previewText?.slice(0, 200),
+          durationMs: Date.now() - startedAt,
+          hasMedia: mediaUrls.length > 0,
+          accountId: delivery.accountId,
+        });
+        return { status: "ran", durationMs: Date.now() - startedAt };
+      }
 
-    if (!visibility.showAlerts) {
-      await restoreHeartbeatUpdatedAt({
-        storePath,
-        sessionKey,
-        updatedAt: previousUpdatedAt,
-      });
-      emitHeartbeatEvent({
-        status: "skipped",
-        reason: "alerts-disabled",
-        preview: previewText?.slice(0, 200),
-        durationMs: Date.now() - startedAt,
+      if (!visibility.showAlerts) {
+        await restoreHeartbeatUpdatedAt({
+          storePath,
+          sessionKey,
+          updatedAt: previousUpdatedAt,
+        });
+        emitHeartbeatEvent({
+          status: "skipped",
+          reason: "alerts-disabled",
+          preview: previewText?.slice(0, 200),
+          durationMs: Date.now() - startedAt,
+          channel: delivery.channel,
+          hasMedia: mediaUrls.length > 0,
+          accountId: delivery.accountId,
+          indicatorType: visibility.useIndicator ? resolveIndicatorType("sent") : undefined,
+        });
+        return { status: "ran", durationMs: Date.now() - startedAt };
+      }
+
+      const deliveryAccountId = delivery.accountId;
+      const heartbeatPlugin = getChannelPlugin(delivery.channel);
+      if (heartbeatPlugin?.heartbeat?.checkReady) {
+        const readiness = await heartbeatPlugin.heartbeat.checkReady({
+          cfg,
+          accountId: deliveryAccountId,
+          deps: opts.deps,
+        });
+        if (!readiness.ok) {
+          emitHeartbeatEvent({
+            status: "skipped",
+            reason: readiness.reason,
+            preview: previewText?.slice(0, 200),
+            durationMs: Date.now() - startedAt,
+            hasMedia: mediaUrls.length > 0,
+            channel: delivery.channel,
+            accountId: delivery.accountId,
+          });
+          log.info("heartbeat: channel not ready", {
+            channel: delivery.channel,
+            reason: readiness.reason,
+          });
+          return { status: "skipped", reason: readiness.reason };
+        }
+      }
+
+      await deliverOutboundPayloads({
+        cfg,
         channel: delivery.channel,
+        to: delivery.to,
+        accountId: deliveryAccountId,
+        session: outboundSession,
+        threadId: delivery.threadId,
+        payloads: [
+          ...reasoningPayloads,
+          ...(shouldSkipMain
+            ? []
+            : [
+                {
+                  text: normalized.text,
+                  mediaUrls,
+                },
+              ]),
+        ],
+        deps: opts.deps,
+      });
+
+      // Record last delivered heartbeat payload for dedupe.
+      // Patch under the store lock so concurrent /new or sessions.patch updates
+      // (sessionId, routes, etc.) are not reverted by a stale full-store write.
+      if (!shouldSkipMain && normalized.text.trim()) {
+        await updateSessionStoreEntry({
+          storePath,
+          sessionKey,
+          update: async () => ({
+            lastHeartbeatText: normalized.text,
+            lastHeartbeatSentAt: startedAt,
+          }),
+        });
+      }
+
+      emitHeartbeatEvent({
+        status: "sent",
+        to: delivery.to,
+        preview: previewText?.slice(0, 200),
+        durationMs: Date.now() - startedAt,
         hasMedia: mediaUrls.length > 0,
+        channel: delivery.channel,
         accountId: delivery.accountId,
         indicatorType: visibility.useIndicator ? resolveIndicatorType("sent") : undefined,
       });
       return { status: "ran", durationMs: Date.now() - startedAt };
+    } finally {
+      // Heartbeat agent runs defer followup drain so prune can finish first.
+      kickFollowupDrainIfIdle(sessionKey);
     }
-
-    const deliveryAccountId = delivery.accountId;
-    const heartbeatPlugin = getChannelPlugin(delivery.channel);
-    if (heartbeatPlugin?.heartbeat?.checkReady) {
-      const readiness = await heartbeatPlugin.heartbeat.checkReady({
-        cfg,
-        accountId: deliveryAccountId,
-        deps: opts.deps,
-      });
-      if (!readiness.ok) {
-        emitHeartbeatEvent({
-          status: "skipped",
-          reason: readiness.reason,
-          preview: previewText?.slice(0, 200),
-          durationMs: Date.now() - startedAt,
-          hasMedia: mediaUrls.length > 0,
-          channel: delivery.channel,
-          accountId: delivery.accountId,
-        });
-        log.info("heartbeat: channel not ready", {
-          channel: delivery.channel,
-          reason: readiness.reason,
-        });
-        return { status: "skipped", reason: readiness.reason };
-      }
-    }
-
-    await deliverOutboundPayloads({
-      cfg,
-      channel: delivery.channel,
-      to: delivery.to,
-      accountId: deliveryAccountId,
-      session: outboundSession,
-      threadId: delivery.threadId,
-      payloads: [
-        ...reasoningPayloads,
-        ...(shouldSkipMain
-          ? []
-          : [
-              {
-                text: normalized.text,
-                mediaUrls,
-              },
-            ]),
-      ],
-      deps: opts.deps,
-    });
-
-    // Record last delivered heartbeat payload for dedupe.
-    if (!shouldSkipMain && normalized.text.trim()) {
-      const store = loadSessionStore(storePath);
-      const current = store[sessionKey];
-      if (current) {
-        store[sessionKey] = {
-          ...current,
-          lastHeartbeatText: normalized.text,
-          lastHeartbeatSentAt: startedAt,
-        };
-        await saveSessionStore(storePath, store);
-      }
-    }
-
-    emitHeartbeatEvent({
-      status: "sent",
-      to: delivery.to,
-      preview: previewText?.slice(0, 200),
-      durationMs: Date.now() - startedAt,
-      hasMedia: mediaUrls.length > 0,
-      channel: delivery.channel,
-      accountId: delivery.accountId,
-      indicatorType: visibility.useIndicator ? resolveIndicatorType("sent") : undefined,
-    });
-    return { status: "ran", durationMs: Date.now() - startedAt };
   } catch (err) {
     const reason = formatErrorMessage(err);
     emitHeartbeatEvent({

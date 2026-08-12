@@ -2,7 +2,7 @@ import { loadSessionStore } from "../../config/sessions.js";
 import { isAudioFileName } from "../../media/mime.js";
 import { normalizeVerboseLevel, type VerboseLevel } from "../thinking.js";
 import type { ReplyPayload } from "../types.js";
-import { scheduleFollowupDrain } from "./queue.js";
+import { armFollowupDrainCallback, scheduleFollowupDrain } from "./queue.js";
 import type { TypingSignaler } from "./typing-mode.js";
 
 const hasAudioMedia = (urls?: string[]): boolean =>
@@ -54,7 +54,15 @@ export const finalizeWithFollowup = <T>(
   value: T,
   queueKey: string,
   runFollowupTurn: Parameters<typeof scheduleFollowupDrain>[1],
+  opts?: { deferDrain?: boolean },
 ): T => {
+  // Heartbeat runners prune HEARTBEAT_OK transcript bytes after the agent returns.
+  // Defer followup drain until that prune finishes so queued user turns are not
+  // truncated by size-based fs.truncate.
+  if (opts?.deferDrain) {
+    armFollowupDrainCallback(queueKey, runFollowupTurn);
+    return value;
+  }
   scheduleFollowupDrain(queueKey, runFollowupTurn);
   return value;
 };
