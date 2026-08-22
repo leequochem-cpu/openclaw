@@ -273,6 +273,84 @@ describe("chat abort transcript persistence", () => {
     });
   });
 
+  it("does not write abort partials into a rotated session transcript", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-chat-abort-rotated-"));
+    const runSessionId = "sess-before-reset";
+    const rotatedSessionId = "sess-after-reset";
+    const runTranscriptPath = path.join(dir, `${runSessionId}.jsonl`);
+    const rotatedTranscriptPath = path.join(dir, `${rotatedSessionId}.jsonl`);
+    await writeTranscriptHeader(runTranscriptPath, runSessionId);
+    await writeTranscriptHeader(rotatedTranscriptPath, rotatedSessionId);
+    // Store already points at the post-/new session, as initSessionState does
+    // before the in-flight run is aborted.
+    setMockSessionEntry(rotatedTranscriptPath, rotatedSessionId);
+
+    const runId = "idem-abort-rotated";
+    const respond = vi.fn();
+    const context = createChatAbortContext({
+      chatAbortControllers: new Map([[runId, createActiveRun("main", runSessionId)]]),
+      chatRunBuffers: new Map([[runId, "Leftover text from the previous session"]]),
+      chatDeltaSentAt: new Map([[runId, Date.now()]]),
+    });
+
+    await invokeChatAbort(context, { sessionKey: "main", runId }, respond);
+
+    const [ok, payload] = respond.mock.calls.at(-1) ?? [];
+    expect(ok).toBe(true);
+    expect(payload).toMatchObject({ aborted: true, runIds: [runId] });
+
+    const rotatedLines = await readTranscriptLines(rotatedTranscriptPath);
+    const rotatedPersisted = rotatedLines
+      .map((line) => line.message)
+      .find((message) => message?.idempotencyKey === `${runId}:assistant`);
+    expect(rotatedPersisted).toBeUndefined();
+
+    const runLines = await readTranscriptLines(runTranscriptPath);
+    const runPersisted = runLines
+      .map((line) => line.message)
+      .find((message) => message?.idempotencyKey === `${runId}:assistant`);
+    expect(runPersisted).toMatchObject({
+      idempotencyKey: `${runId}:assistant`,
+      openclawAbort: {
+        aborted: true,
+        origin: "rpc",
+        runId,
+      },
+    });
+  });
+
+  it("skips abort persistence when the run-scoped transcript was already archived", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-chat-abort-archived-"));
+    const runSessionId = "sess-archived";
+    const rotatedSessionId = "sess-fresh";
+    const rotatedTranscriptPath = path.join(dir, `${rotatedSessionId}.jsonl`);
+    await writeTranscriptHeader(rotatedTranscriptPath, rotatedSessionId);
+    setMockSessionEntry(rotatedTranscriptPath, rotatedSessionId);
+
+    const runId = "idem-abort-archived";
+    const respond = vi.fn();
+    const context = createChatAbortContext({
+      chatAbortControllers: new Map([[runId, createActiveRun("main", runSessionId)]]),
+      chatRunBuffers: new Map([[runId, "Partial that must not recreate an archived file"]]),
+      chatDeltaSentAt: new Map([[runId, Date.now()]]),
+    });
+
+    await invokeChatAbort(context, { sessionKey: "main", runId }, respond);
+
+    const [ok, payload] = respond.mock.calls.at(-1) ?? [];
+    expect(ok).toBe(true);
+    expect(payload).toMatchObject({ aborted: true, runIds: [runId] });
+
+    const rotatedLines = await readTranscriptLines(rotatedTranscriptPath);
+    const rotatedPersisted = rotatedLines
+      .map((line) => line.message)
+      .find((message) => message?.idempotencyKey === `${runId}:assistant`);
+    expect(rotatedPersisted).toBeUndefined();
+    await expect(fs.access(path.join(dir, `${runSessionId}.jsonl`))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
   it("skips run-scoped transcript persistence when partial text is blank", async () => {
     const { transcriptPath, sessionId } = await createTranscriptFixture(
       "openclaw-chat-abort-run-blank-",
