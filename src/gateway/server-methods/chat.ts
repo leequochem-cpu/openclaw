@@ -592,13 +592,17 @@ function persistAbortedPartials(params: {
   }
   const { storePath, entry } = loadSessionEntry(params.sessionKey);
   for (const snapshot of params.snapshots) {
-    const sessionId = entry?.sessionId ?? snapshot.sessionId ?? snapshot.runId;
+    // Prefer the run-scoped id captured at start. After /new or /reset the
+    // store entry may already point at a rotated session; writing there would
+    // contaminate the fresh transcript with the aborted run's text.
+    const sessionId = snapshot.sessionId || snapshot.runId;
+    const matchesStoreEntry = entry?.sessionId === sessionId;
     const appended = appendAssistantTranscriptMessage({
       message: snapshot.text,
       sessionId,
       storePath,
-      sessionFile: entry?.sessionFile,
-      createIfMissing: true,
+      sessionFile: matchesStoreEntry ? entry?.sessionFile : undefined,
+      createIfMissing: !entry || matchesStoreEntry,
       idempotencyKey: `${snapshot.runId}:assistant`,
       abortMeta: {
         aborted: true,
