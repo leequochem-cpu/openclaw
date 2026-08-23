@@ -3,7 +3,7 @@ import { normalizeChannelId } from "../channels/plugins/index.js";
 import { createOutboundSendDeps } from "../cli/outbound-send-deps.js";
 import { agentCommandFromIngress } from "../commands/agent.js";
 import { loadConfig } from "../config/config.js";
-import { updateSessionStore } from "../config/sessions.js";
+import { mergeSessionEntry, updateSessionStore } from "../config/sessions.js";
 import { requestHeartbeatNow } from "../infra/heartbeat-wake.js";
 import { deliverOutboundPayloads } from "../infra/outbound/deliver.js";
 import { buildOutboundSessionContext } from "../infra/outbound/session-context.js";
@@ -141,8 +141,6 @@ async function touchSessionStore(params: {
   cfg: ReturnType<typeof loadConfig>;
   sessionKey: string;
   storePath: LoadedSessionEntry["storePath"];
-  canonicalKey: LoadedSessionEntry["canonicalKey"];
-  entry: LoadedSessionEntry["entry"];
   sessionId: string;
   now: number;
 }) {
@@ -156,22 +154,24 @@ async function touchSessionStore(params: {
       key: params.sessionKey,
       store,
     });
+    // Migrate the live alias entry onto the canonical key before prune.
+    // A replace-with-stub here used to drop sessionFile, delivery context,
+    // model/auth overrides, and thread/account routing on every voice wake.
+    const existing =
+      store[target.canonicalKey] ??
+      target.storeKeys.map((key) => store[key]).find((entry) => entry !== undefined);
+    if (existing && store[target.canonicalKey] !== existing) {
+      store[target.canonicalKey] = existing;
+    }
     pruneLegacyStoreKeys({
       store,
       canonicalKey: target.canonicalKey,
       candidates: target.storeKeys,
     });
-    store[params.canonicalKey] = {
+    store[target.canonicalKey] = mergeSessionEntry(store[target.canonicalKey], {
       sessionId: params.sessionId,
       updatedAt: params.now,
-      thinkingLevel: params.entry?.thinkingLevel,
-      verboseLevel: params.entry?.verboseLevel,
-      reasoningLevel: params.entry?.reasoningLevel,
-      systemSent: params.entry?.systemSent,
-      sendPolicy: params.entry?.sendPolicy,
-      lastChannel: params.entry?.lastChannel,
-      lastTo: params.entry?.lastTo,
-    };
+    });
   });
 }
 
@@ -180,8 +180,6 @@ function queueSessionStoreTouch(params: {
   cfg: ReturnType<typeof loadConfig>;
   sessionKey: string;
   storePath: LoadedSessionEntry["storePath"];
-  canonicalKey: LoadedSessionEntry["canonicalKey"];
-  entry: LoadedSessionEntry["entry"];
   sessionId: string;
   now: number;
 }) {
@@ -189,8 +187,6 @@ function queueSessionStoreTouch(params: {
     cfg: params.cfg,
     sessionKey: params.sessionKey,
     storePath: params.storePath,
-    canonicalKey: params.canonicalKey,
-    entry: params.entry,
     sessionId: params.sessionId,
     now: params.now,
   }).catch((err) => {
@@ -290,8 +286,6 @@ export const handleNodeEvent = async (ctx: NodeEventContext, nodeId: string, evt
         cfg,
         sessionKey,
         storePath,
-        canonicalKey,
-        entry,
         sessionId,
         now,
       });
@@ -392,7 +386,7 @@ export const handleNodeEvent = async (ctx: NodeEventContext, nodeId: string, evt
       const { storePath, entry, canonicalKey } = loadSessionEntry(sessionKey);
       const now = Date.now();
       const sessionId = entry?.sessionId ?? randomUUID();
-      await touchSessionStore({ cfg, sessionKey, storePath, canonicalKey, entry, sessionId, now });
+      await touchSessionStore({ cfg, sessionKey, storePath, sessionId, now });
 
       if (deliverRequested && (!channel || !to)) {
         const entryChannel =
