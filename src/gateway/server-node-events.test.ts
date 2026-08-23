@@ -40,9 +40,13 @@ vi.mock("../config/config.js", () => ({
   loadConfig: vi.fn(() => ({ session: { mainKey: "agent:main:main" } })),
   STATE_DIR: "/tmp/openclaw-state",
 }));
-vi.mock("../config/sessions.js", () => ({
-  updateSessionStore: vi.fn(),
-}));
+vi.mock("../config/sessions.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../config/sessions.js")>();
+  return {
+    ...actual,
+    updateSessionStore: vi.fn(),
+  };
+});
 vi.mock("./session-utils.js", () => ({
   loadSessionEntry: vi.fn((sessionKey: string) => buildSessionLookup(sessionKey)),
   pruneLegacyStoreKeys: vi.fn(),
@@ -61,7 +65,11 @@ import { requestHeartbeatNow } from "../infra/heartbeat-wake.js";
 import { enqueueSystemEvent } from "../infra/system-events.js";
 import type { NodeEventContext } from "./server-node-events-types.js";
 import { handleNodeEvent } from "./server-node-events.js";
-import { loadSessionEntry } from "./session-utils.js";
+import {
+  loadSessionEntry,
+  pruneLegacyStoreKeys,
+  resolveGatewaySessionStoreTarget,
+} from "./session-utils.js";
 
 const enqueueSystemEventMock = vi.mocked(enqueueSystemEvent);
 const requestHeartbeatNowMock = vi.mocked(requestHeartbeatNow);
@@ -69,6 +77,8 @@ const loadConfigMock = vi.mocked(loadConfig);
 const agentCommandMock = vi.mocked(agentCommand);
 const updateSessionStoreMock = vi.mocked(updateSessionStore);
 const loadSessionEntryMock = vi.mocked(loadSessionEntry);
+const pruneLegacyStoreKeysMock = vi.mocked(pruneLegacyStoreKeys);
+const resolveGatewaySessionStoreTargetMock = vi.mocked(resolveGatewaySessionStoreTarget);
 
 function buildCtx(): NodeEventContext {
   return {
@@ -357,6 +367,121 @@ describe("voice transcript events", () => {
 
     expect(agentCommandMock).toHaveBeenCalledTimes(1);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("voice session-store update failed"));
+  });
+
+  it("merges voice session-store touches instead of replacing populated entries", async () => {
+    const sessionKey = "agent:main:main";
+    const existing = {
+      sessionId: "sid-main-keep",
+      updatedAt: 1_700_000_000_000,
+      sessionFile: "/tmp/openclaw/agents/main/sessions/2026-08-23_sid-main-keep.jsonl",
+      deliveryContext: { channel: "telegram", to: "123", accountId: "acct-1", threadId: 99 },
+      lastChannel: "telegram" as const,
+      lastTo: "123",
+      lastAccountId: "acct-1",
+      lastThreadId: 99,
+      modelOverride: "claude-opus-4-6",
+      authProfileOverride: "work",
+      claudeCliSessionId: "cli-sess-keep",
+      skillsSnapshot: { prompt: "keep", skills: [] },
+    };
+    loadSessionEntryMock.mockReturnValueOnce({
+      ...buildSessionLookup(sessionKey, {
+        sessionId: existing.sessionId,
+        lastChannel: existing.lastChannel,
+        lastTo: existing.lastTo,
+        updatedAt: existing.updatedAt,
+      }),
+      entry: existing,
+      canonicalKey: sessionKey,
+    });
+    const store: Record<string, typeof existing> = {
+      [sessionKey]: { ...existing },
+    };
+    updateSessionStoreMock.mockImplementationOnce(async (_storePath, update) => {
+      update(store);
+    });
+
+    const ctx = buildCtx();
+    await handleNodeEvent(ctx, "node-voice-keep", {
+      event: "voice.transcript",
+      payloadJSON: JSON.stringify({
+        text: "what is on my calendar",
+        sessionKey,
+      }),
+    });
+
+    expect(store[sessionKey]).toMatchObject({
+      sessionId: "sid-main-keep",
+      sessionFile: existing.sessionFile,
+      deliveryContext: existing.deliveryContext,
+      lastAccountId: "acct-1",
+      lastThreadId: 99,
+      modelOverride: "claude-opus-4-6",
+      authProfileOverride: "work",
+      claudeCliSessionId: "cli-sess-keep",
+      skillsSnapshot: existing.skillsSnapshot,
+      lastChannel: "telegram",
+      lastTo: "123",
+    });
+    expect(store[sessionKey]?.updatedAt).toBeGreaterThan(existing.updatedAt);
+  });
+
+  it("migrates a legacy session-store alias before pruning on voice touch", async () => {
+    const canonicalKey = "agent:main:main";
+    const legacyKey = "main";
+    const existing = {
+      sessionId: "sid-legacy-keep",
+      updatedAt: 1_700_000_000_000,
+      sessionFile: "/tmp/openclaw/agents/main/sessions/sid-legacy-keep.jsonl",
+      lastAccountId: "acct-legacy",
+      lastThreadId: "topic-7",
+      authProfileOverride: "personal",
+    };
+    loadSessionEntryMock.mockReturnValueOnce({
+      ...buildSessionLookup(canonicalKey, {
+        sessionId: existing.sessionId,
+        updatedAt: existing.updatedAt,
+      }),
+      entry: existing,
+      canonicalKey,
+      legacyKey,
+    });
+    resolveGatewaySessionStoreTargetMock.mockReturnValueOnce({
+      canonicalKey,
+      storeKeys: [canonicalKey, legacyKey],
+    });
+    pruneLegacyStoreKeysMock.mockImplementationOnce((params) => {
+      for (const candidate of params.candidates) {
+        if (candidate !== params.canonicalKey) {
+          delete params.store[candidate];
+        }
+      }
+    });
+    const store: Record<string, typeof existing> = {
+      [legacyKey]: { ...existing },
+    };
+    updateSessionStoreMock.mockImplementationOnce(async (_storePath, update) => {
+      update(store);
+    });
+
+    const ctx = buildCtx();
+    await handleNodeEvent(ctx, "node-voice-legacy", {
+      event: "voice.transcript",
+      payloadJSON: JSON.stringify({
+        text: "continue this thread",
+        sessionKey: "main",
+      }),
+    });
+
+    expect(store[legacyKey]).toBeUndefined();
+    expect(store[canonicalKey]).toMatchObject({
+      sessionId: "sid-legacy-keep",
+      sessionFile: existing.sessionFile,
+      lastAccountId: "acct-legacy",
+      lastThreadId: "topic-7",
+      authProfileOverride: "personal",
+    });
   });
 });
 
