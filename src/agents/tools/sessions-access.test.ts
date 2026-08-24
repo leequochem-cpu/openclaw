@@ -140,4 +140,21 @@ describe("createSessionVisibilityGuard", () => {
         "Session history visibility is restricted to the current session (tools.sessions.visibility=self).",
     });
   });
+
+  it("uses status-specific tree visibility errors", async () => {
+    const guard = await createSessionVisibilityGuard({
+      action: "status",
+      requesterSessionKey: "agent:main:subagent:child",
+      visibility: "tree",
+      a2aPolicy: createAgentToAgentPolicy({} as unknown as OpenClawConfig),
+    });
+
+    expect(guard.check("agent:main:subagent:child")).toEqual({ allowed: true });
+    expect(guard.check("agent:main:main")).toEqual({
+      allowed: false,
+      status: "forbidden",
+      error:
+        "Session status visibility is restricted to the current session tree (tools.sessions.visibility=tree).",
+    });
+  });
 });
