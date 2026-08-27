@@ -64,6 +64,11 @@ function createFetchedReactionMessage(chatId: string) {
 async function resolveReactionWithLookup(params: {
   event?: FeishuReactionCreatedEvent;
   lookupChatId: string;
+  fetchChatMode?: (args: {
+    cfg: ClawdbotConfig;
+    accountId: string;
+    chatId: string;
+  }) => Promise<"p2p" | "group" | null>;
 }) {
   return await resolveReactionSyntheticEvent({
     cfg,
@@ -71,6 +76,7 @@ async function resolveReactionWithLookup(params: {
     event: params.event ?? makeReactionEvent(),
     botOpenId: "ou_bot",
     fetchMessage: async () => createFetchedReactionMessage(params.lookupChatId),
+    fetchChatMode: params.fetchChatMode,
     uuid: () => "fixed-uuid",
   });
 }
@@ -298,9 +304,11 @@ describe("resolveReactionSyntheticEvent", () => {
         content: "hello",
         contentType: "text",
       }),
+      fetchChatMode: async () => "group",
       uuid: () => "fixed-uuid",
     });
     expect(result?.message.message_id).toBe("om_msg1:reaction:THUMBSUP:fixed-uuid");
+    expect(result?.message.chat_type).toBe("group");
   });
 
   it("drops unverified reactions when sender verification times out", async () => {
@@ -348,17 +356,54 @@ describe("resolveReactionSyntheticEvent", () => {
   it("falls back to reacted message chat_id when event chat_id is absent", async () => {
     const result = await resolveReactionWithLookup({
       lookupChatId: "oc_group_from_lookup",
+      fetchChatMode: async () => "group",
     });
 
     expect(result?.message.chat_id).toBe("oc_group_from_lookup");
+    expect(result?.message.chat_type).toBe("group");
+  });
+
+  it("resolves DM chat mode when official reaction events omit chat_type", async () => {
+    const fetchChatMode = vi.fn(async () => "p2p" as const);
+    const result = await resolveReactionWithLookup({
+      lookupChatId: "oc_dm_from_lookup",
+      fetchChatMode,
+    });
+
+    expect(fetchChatMode).toHaveBeenCalledWith(
+      expect.objectContaining({ chatId: "oc_dm_from_lookup" }),
+    );
+    expect(result?.message.chat_id).toBe("oc_dm_from_lookup");
     expect(result?.message.chat_type).toBe("p2p");
   });
 
-  it("falls back to sender p2p chat when lookup returns empty chat_id", async () => {
-    const result = await resolveReactionWithLookup({
-      lookupChatId: "",
+  it("drops reactions when chat mode cannot be resolved for oc_ chat ids", async () => {
+    const log = vi.fn();
+    const result = await resolveReactionSyntheticEvent({
+      cfg,
+      accountId: "default",
+      event: makeReactionEvent(),
+      botOpenId: "ou_bot",
+      fetchMessage: async () => createFetchedReactionMessage("oc_unknown"),
+      fetchChatMode: async () => null,
+      logger: log,
+      uuid: () => "fixed-uuid",
     });
 
+    expect(result).toBeNull();
+    expect(log).toHaveBeenCalledWith(
+      expect.stringContaining("unable to resolve chat type for oc_unknown"),
+    );
+  });
+
+  it("falls back to sender p2p chat when lookup returns empty chat_id", async () => {
+    const fetchChatMode = vi.fn(async () => "group" as const);
+    const result = await resolveReactionWithLookup({
+      lookupChatId: "",
+      fetchChatMode,
+    });
+
+    expect(fetchChatMode).not.toHaveBeenCalled();
     expect(result?.message.chat_id).toBe("p2p:ou_user1");
     expect(result?.message.chat_type).toBe("p2p");
   });

@@ -10,7 +10,7 @@ import {
   type FeishuBotAddedEvent,
 } from "./bot.js";
 import { handleFeishuCardAction, type FeishuCardActionEvent } from "./card-action.js";
-import { createEventDispatcher } from "./client.js";
+import { createEventDispatcher, createFeishuClient } from "./client.js";
 import {
   hasRecordedMessage,
   hasRecordedMessagePersistent,
@@ -38,16 +38,86 @@ export type FeishuReactionCreatedEvent = {
   action_time?: string;
 };
 
+export type FeishuReactionChatMode = "p2p" | "group";
+
 type ResolveReactionSyntheticEventParams = {
   cfg: ClawdbotConfig;
   accountId: string;
   event: FeishuReactionCreatedEvent;
   botOpenId?: string;
   fetchMessage?: typeof getMessageFeishu;
+  /**
+   * Resolve DM vs group for reaction events that omit `chat_type`.
+   * Official `im.message.reaction.created_v1` payloads do not include it.
+   */
+  fetchChatMode?: (params: {
+    cfg: ClawdbotConfig;
+    accountId: string;
+    chatId: string;
+  }) => Promise<FeishuReactionChatMode | null>;
   verificationTimeoutMs?: number;
   logger?: (message: string) => void;
   uuid?: () => string;
 };
+
+function isFeishuGroupChatType(chatType: string | undefined): boolean {
+  return chatType === "group";
+}
+
+function isFeishuDirectChatType(chatType: string | undefined): boolean {
+  return chatType === "p2p" || chatType === "private";
+}
+
+async function fetchFeishuChatMode(params: {
+  cfg: ClawdbotConfig;
+  accountId: string;
+  chatId: string;
+}): Promise<FeishuReactionChatMode | null> {
+  try {
+    const account = resolveFeishuAccount({ cfg: params.cfg, accountId: params.accountId });
+    const client = createFeishuClient(account);
+    const res = await client.im.chat.get({ path: { chat_id: params.chatId } });
+    if (res.code !== 0) {
+      return null;
+    }
+    const mode = res.data?.chat_mode;
+    if (mode === "p2p") {
+      return "p2p";
+    }
+    // Topic chats are group-scoped and must use groupPolicy, not DM pairing.
+    if (mode === "group" || mode === "topic") {
+      return "group";
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+async function resolveSyntheticReactionChatType(params: {
+  event: FeishuReactionCreatedEvent;
+  chatId: string;
+  cfg: ClawdbotConfig;
+  accountId: string;
+  fetchChatMode?: ResolveReactionSyntheticEventParams["fetchChatMode"];
+}): Promise<FeishuReactionChatMode | null> {
+  if (isFeishuGroupChatType(params.event.chat_type)) {
+    return "group";
+  }
+  if (isFeishuDirectChatType(params.event.chat_type)) {
+    return "p2p";
+  }
+  // Synthetic DM fallback used when message lookup has no chat_id.
+  if (params.chatId.startsWith("p2p:")) {
+    return "p2p";
+  }
+  const fetchChatMode = params.fetchChatMode ?? fetchFeishuChatMode;
+  return await fetchChatMode({
+    cfg: params.cfg,
+    accountId: params.accountId,
+    chatId: params.chatId,
+  });
+}
 
 export async function resolveReactionSyntheticEvent(
   params: ResolveReactionSyntheticEventParams,
@@ -58,6 +128,7 @@ export async function resolveReactionSyntheticEvent(
     event,
     botOpenId,
     fetchMessage = getMessageFeishu,
+    fetchChatMode,
     verificationTimeoutMs = FEISHU_REACTION_VERIFY_TIMEOUT_MS,
     logger,
     uuid = () => crypto.randomUUID(),
@@ -107,8 +178,22 @@ export async function resolveReactionSyntheticEvent(
 
   const syntheticChatIdRaw = event.chat_id ?? reactedMsg.chatId;
   const syntheticChatId = syntheticChatIdRaw?.trim() ? syntheticChatIdRaw : `p2p:${senderId}`;
-  const syntheticChatType: "p2p" | "group" | "private" =
-    event.chat_type === "group" ? "group" : "p2p";
+  // Official reaction events omit chat_type. Defaulting to p2p would skip
+  // groupPolicy and post DM pairing codes into group chats (oc_* IDs).
+  const syntheticChatType = await resolveSyntheticReactionChatType({
+    event,
+    chatId: syntheticChatId,
+    cfg,
+    accountId,
+    fetchChatMode,
+  });
+  if (!syntheticChatType) {
+    logger?.(
+      `feishu[${accountId}]: dropping reaction ${emoji} on ${messageId} ` +
+        `(unable to resolve chat type for ${syntheticChatId})`,
+    );
+    return null;
+  }
   return {
     sender: {
       sender_id: { open_id: senderId },
