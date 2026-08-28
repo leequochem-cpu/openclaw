@@ -69,19 +69,25 @@ export async function generateVoiceResponse(
   // Ensure workspace exists
   await deps.ensureAgentWorkspace({ dir: workspaceDir });
 
-  // Load or create session entry
-  const sessionStore = deps.loadSessionStore(storePath);
-  const now = Date.now();
-  let sessionEntry = sessionStore[sessionKey] as SessionEntry | undefined;
-
-  if (!sessionEntry) {
-    sessionEntry = {
-      sessionId: crypto.randomUUID(),
-      updatedAt: now,
-    };
-    sessionStore[sessionKey] = sessionEntry;
-    await deps.saveSessionStore(storePath, sessionStore);
-  }
+  // Load or create the voice session. Creation must happen inside
+  // updateSessionStore (re-read + lock) so a stale unlocked snapshot cannot
+  // clobber concurrent writers to other keys such as agent:main:main.
+  const existingEntry = deps.loadSessionStore(storePath)[sessionKey] as SessionEntry | undefined;
+  const sessionEntry =
+    typeof existingEntry?.sessionId === "string" && existingEntry.sessionId
+      ? existingEntry
+      : ((await deps.updateSessionStore(storePath, (store) => {
+          const current = store[sessionKey] as SessionEntry | undefined;
+          if (typeof current?.sessionId === "string" && current.sessionId) {
+            return current;
+          }
+          const created: SessionEntry = {
+            sessionId: crypto.randomUUID(),
+            updatedAt: Date.now(),
+          };
+          store[sessionKey] = created;
+          return created;
+        })) as SessionEntry);
 
   const sessionId = sessionEntry.sessionId;
   const sessionFile = deps.resolveSessionFilePath(sessionId, sessionEntry, {
