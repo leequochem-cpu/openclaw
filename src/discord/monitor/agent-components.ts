@@ -63,6 +63,7 @@ import {
   resolveDiscordGuildEntry,
   resolveDiscordMemberAccessState,
   resolveDiscordOwnerAccess,
+  resolveGroupDmAllow,
 } from "./allow-list.js";
 import { formatDiscordUserTag } from "./format.js";
 import {
@@ -71,6 +72,7 @@ import {
 } from "./inbound-context.js";
 import { buildDirectLabel, buildGuildLabel } from "./reply-context.js";
 import { deliverDiscordReply } from "./reply-delivery.js";
+import { buildDiscordRoutePeer } from "./route-resolution.js";
 import { sendTyping } from "./typing.js";
 
 const AGENT_BUTTON_KEY = "agent";
@@ -107,6 +109,7 @@ function resolveAgentComponentRoute(params: {
   rawGuildId: string | undefined;
   memberRoleIds: string[];
   isDirectMessage: boolean;
+  isGroupDm: boolean;
   userId: string;
   channelId: string;
   parentId: string | undefined;
@@ -117,10 +120,12 @@ function resolveAgentComponentRoute(params: {
     accountId: params.ctx.accountId,
     guildId: params.rawGuildId,
     memberRoleIds: params.memberRoleIds,
-    peer: {
-      kind: params.isDirectMessage ? "direct" : "channel",
-      id: params.isDirectMessage ? params.userId : params.channelId,
-    },
+    peer: buildDiscordRoutePeer({
+      isDirectMessage: params.isDirectMessage,
+      isGroupDm: params.isGroupDm,
+      directUserId: params.userId,
+      conversationId: params.channelId,
+    }),
     parentPeer: params.parentId ? { kind: "channel", id: params.parentId } : undefined,
   });
 }
@@ -178,6 +183,7 @@ async function resolveComponentInteractionContext(params: {
   replyOpts: { ephemeral?: boolean };
   rawGuildId: string | undefined;
   isDirectMessage: boolean;
+  isGroupDm: boolean;
   memberRoleIds: string[];
 } | null> {
   const { interaction, label } = params;
@@ -217,7 +223,13 @@ async function resolveComponentInteractionContext(params: {
   // P1 FIX: Use rawData.guild_id as source of truth - interaction.guild can be null
   // when guild is not cached even though guild_id is present in rawData
   const rawGuildId = interaction.rawData.guild_id;
-  const isDirectMessage = !rawGuildId;
+  const channelType =
+    interaction.channel && "type" in interaction.channel
+      ? (interaction.channel.type as number)
+      : undefined;
+  const isGroupDm = channelType === ChannelType.GroupDM;
+  // Group DMs have no guild_id; do not treat them as 1:1 DMs.
+  const isDirectMessage = !rawGuildId && !isGroupDm;
   const memberRoleIds = Array.isArray(interaction.rawData.member?.roles)
     ? interaction.rawData.member.roles.map((roleId: string) => String(roleId))
     : [];
@@ -230,6 +242,7 @@ async function resolveComponentInteractionContext(params: {
     replyOpts,
     rawGuildId,
     isDirectMessage,
+    isGroupDm,
     memberRoleIds,
   };
 }
@@ -569,6 +582,51 @@ async function ensureDmComponentAuthorized(params: {
   return false;
 }
 
+async function ensureGroupDmComponentAllowed(params: {
+  ctx: AgentComponentContext;
+  interaction: AgentComponentInteraction;
+  channelId: string;
+  channelName?: string;
+  channelSlug: string;
+  componentLabel: string;
+  replyOpts: { ephemeral?: boolean };
+}): Promise<boolean> {
+  const { ctx, interaction, channelId, componentLabel, replyOpts } = params;
+  const groupEnabled = ctx.discordConfig?.dm?.groupEnabled ?? false;
+  if (!groupEnabled) {
+    logVerbose(`agent ${componentLabel}: blocked group DM (group dms disabled)`);
+    try {
+      await interaction.reply({
+        content: "Discord group DMs are disabled.",
+        ...replyOpts,
+      });
+    } catch {
+      // Interaction may have expired
+    }
+    return false;
+  }
+  if (
+    !resolveGroupDmAllow({
+      channels: ctx.discordConfig?.dm?.groupChannels,
+      channelId,
+      channelName: params.channelName,
+      channelSlug: params.channelSlug,
+    })
+  ) {
+    logVerbose(`agent ${componentLabel}: blocked group DM ${channelId} (not in groupChannels)`);
+    try {
+      await interaction.reply({
+        content: "This group DM is not allowed.",
+        ...replyOpts,
+      });
+    } catch {
+      // Interaction may have expired
+    }
+    return false;
+  }
+  return true;
+}
+
 async function resolveInteractionContextWithDmAuth(params: {
   ctx: AgentComponentContext;
   interaction: AgentComponentInteraction;
@@ -583,6 +641,22 @@ async function resolveInteractionContextWithDmAuth(params: {
   });
   if (!interactionCtx) {
     return null;
+  }
+  if (interactionCtx.isGroupDm) {
+    const channelCtx = resolveDiscordChannelContext(params.interaction);
+    const allowed = await ensureGroupDmComponentAllowed({
+      ctx: params.ctx,
+      interaction: params.interaction,
+      channelId: interactionCtx.channelId,
+      channelName: channelCtx.channelName,
+      channelSlug: channelCtx.channelSlug,
+      componentLabel: params.componentLabel,
+      replyOpts: interactionCtx.replyOpts,
+    });
+    if (!allowed) {
+      return null;
+    }
+    return interactionCtx;
   }
   if (interactionCtx.isDirectMessage) {
     const authorized = await ensureDmComponentAuthorized({
@@ -774,7 +848,7 @@ function resolveComponentCommandAuthorized(params: {
   allowNameMatching: boolean;
 }): boolean {
   const { ctx, interactionCtx, channelConfig, guildInfo } = params;
-  if (interactionCtx.isDirectMessage) {
+  if (interactionCtx.isDirectMessage || interactionCtx.isGroupDm) {
     return true;
   }
 
@@ -832,10 +906,12 @@ async function dispatchDiscordComponentEvent(params: {
     accountId: ctx.accountId,
     guildId: interactionCtx.rawGuildId,
     memberRoleIds: interactionCtx.memberRoleIds,
-    peer: {
-      kind: interactionCtx.isDirectMessage ? "direct" : "channel",
-      id: interactionCtx.isDirectMessage ? interactionCtx.userId : interactionCtx.channelId,
-    },
+    peer: buildDiscordRoutePeer({
+      isDirectMessage: interactionCtx.isDirectMessage,
+      isGroupDm: interactionCtx.isGroupDm,
+      directUserId: interactionCtx.userId,
+      conversationId: interactionCtx.channelId,
+    }),
     parentPeer: channelCtx.parentId ? { kind: "channel", id: channelCtx.parentId } : undefined,
   });
   const sessionKey = params.routeOverrides?.sessionKey ?? route.sessionKey;
@@ -844,11 +920,13 @@ async function dispatchDiscordComponentEvent(params: {
 
   const fromLabel = interactionCtx.isDirectMessage
     ? buildDirectLabel(interactionCtx.user)
-    : buildGuildLabel({
-        guild: interaction.guild ?? undefined,
-        channelName: channelCtx.channelName ?? interactionCtx.channelId,
-        channelId: interactionCtx.channelId,
-      });
+    : interactionCtx.isGroupDm
+      ? `Group DM ${channelCtx.channelName ? `#${channelCtx.channelName}` : interactionCtx.channelId}`
+      : buildGuildLabel({
+          guild: interaction.guild ?? undefined,
+          channelName: channelCtx.channelName ?? interactionCtx.channelId,
+          channelId: interactionCtx.channelId,
+        });
   const senderName = interactionCtx.user.globalName ?? interactionCtx.user.username;
   const senderUsername = interactionCtx.user.username;
   const senderTag = formatDiscordUserTag(interactionCtx.user);
@@ -873,7 +951,7 @@ async function dispatchDiscordComponentEvent(params: {
     guildInfo,
     sender: { id: interactionCtx.user.id, name: interactionCtx.user.username, tag: senderTag },
     allowNameMatching,
-    isGuild: !interactionCtx.isDirectMessage,
+    isGuild: !interactionCtx.isDirectMessage && !interactionCtx.isGroupDm,
   });
   const groupSystemPrompt = buildDiscordGroupSystemPrompt(channelConfig);
   const pinnedMainDmOwner = interactionCtx.isDirectMessage
@@ -906,7 +984,11 @@ async function dispatchDiscordComponentEvent(params: {
     from: fromLabel,
     timestamp,
     body: eventText,
-    chatType: interactionCtx.isDirectMessage ? "direct" : "channel",
+    chatType: interactionCtx.isDirectMessage
+      ? "direct"
+      : interactionCtx.isGroupDm
+        ? "group"
+        : "channel",
     senderLabel: senderName,
     previousTimestamp,
     envelope: envelopeOptions,
@@ -919,11 +1001,17 @@ async function dispatchDiscordComponentEvent(params: {
     CommandBody: eventText,
     From: interactionCtx.isDirectMessage
       ? `discord:${interactionCtx.userId}`
-      : `discord:channel:${interactionCtx.channelId}`,
+      : interactionCtx.isGroupDm
+        ? `discord:group:${interactionCtx.channelId}`
+        : `discord:channel:${interactionCtx.channelId}`,
     To: `channel:${interactionCtx.channelId}`,
     SessionKey: sessionKey,
     AccountId: accountId,
-    ChatType: interactionCtx.isDirectMessage ? "direct" : "channel",
+    ChatType: interactionCtx.isDirectMessage
+      ? "direct"
+      : interactionCtx.isGroupDm
+        ? "group"
+        : "channel",
     ConversationLabel: fromLabel,
     SenderName: senderName,
     SenderId: interactionCtx.userId,
@@ -1357,6 +1445,7 @@ export class AgentComponentButton extends Button {
       replyOpts,
       rawGuildId,
       isDirectMessage,
+      isGroupDm,
       memberRoleIds,
     } = interactionCtx;
 
@@ -1383,6 +1472,7 @@ export class AgentComponentButton extends Button {
       rawGuildId,
       memberRoleIds,
       isDirectMessage,
+      isGroupDm,
       userId,
       channelId,
       parentId,
@@ -1446,6 +1536,7 @@ export class AgentSelectMenu extends StringSelectMenu {
       replyOpts,
       rawGuildId,
       isDirectMessage,
+      isGroupDm,
       memberRoleIds,
     } = interactionCtx;
 
@@ -1475,6 +1566,7 @@ export class AgentSelectMenu extends StringSelectMenu {
       rawGuildId,
       memberRoleIds,
       isDirectMessage,
+      isGroupDm,
       userId,
       channelId,
       parentId,

@@ -165,3 +165,79 @@ describe("Discord native slash commands with commands.allowFrom", () => {
     expectUnauthorizedReply(interaction);
   });
 });
+
+describe("Discord native slash commands in group DMs", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  async function runGroupDmSlashCommand(params?: {
+    channelId?: string;
+    mutateConfig?: (cfg: OpenClawConfig) => void;
+  }) {
+    const cfg = createConfig();
+    params?.mutateConfig?.(cfg);
+    const command = createCommand(cfg);
+    const interaction = createMockCommandInteraction({
+      userId: "123456789012345678",
+      username: "discord-user",
+      globalName: "Discord User",
+      channelType: ChannelType.GroupDM,
+      channelId: params?.channelId ?? "group-dm-blocked",
+      guildId: null,
+      interactionId: "interaction-group-dm",
+    });
+    vi.spyOn(pluginCommandsModule, "matchPluginCommand").mockReturnValue(null);
+    const dispatchSpy = createDispatchSpy();
+    await (command as { run: (interaction: unknown) => Promise<void> }).run(interaction as unknown);
+    return { dispatchSpy, interaction };
+  }
+
+  it("rejects group DM slash commands when groupEnabled is unset", async () => {
+    const { dispatchSpy, interaction } = await runGroupDmSlashCommand();
+    expect(dispatchSpy).not.toHaveBeenCalled();
+    expect(interaction.reply).toHaveBeenCalledWith(
+      expect.objectContaining({ content: "Discord group DMs are disabled." }),
+    );
+  });
+
+  it("rejects group DM slash commands when the channel is not in groupChannels", async () => {
+    const { dispatchSpy, interaction } = await runGroupDmSlashCommand({
+      mutateConfig: (cfg) => {
+        cfg.channels = {
+          ...cfg.channels,
+          discord: {
+            ...cfg.channels?.discord,
+            dm: { groupEnabled: true, groupChannels: ["allowed-group-dm"] },
+          },
+        };
+      },
+    });
+    expect(dispatchSpy).not.toHaveBeenCalled();
+    expect(interaction.reply).toHaveBeenCalledWith(
+      expect.objectContaining({ content: "This group DM is not allowed." }),
+    );
+  });
+
+  it("allows group DM slash commands when the channel is allowlisted", async () => {
+    const { dispatchSpy, interaction } = await runGroupDmSlashCommand({
+      channelId: "allowed-group-dm",
+      mutateConfig: (cfg) => {
+        cfg.channels = {
+          ...cfg.channels,
+          discord: {
+            ...cfg.channels?.discord,
+            dm: { groupEnabled: true, groupChannels: ["allowed-group-dm"] },
+          },
+        };
+      },
+    });
+    expect(dispatchSpy).toHaveBeenCalledTimes(1);
+    expect(interaction.reply).not.toHaveBeenCalledWith(
+      expect.objectContaining({ content: "Discord group DMs are disabled." }),
+    );
+    expect(interaction.reply).not.toHaveBeenCalledWith(
+      expect.objectContaining({ content: "This group DM is not allowed." }),
+    );
+  });
+});
