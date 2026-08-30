@@ -5,7 +5,7 @@ import type {
   StringSelectMenuInteraction,
 } from "@buape/carbon";
 import type { Client } from "@buape/carbon";
-import type { GatewayPresenceUpdate } from "discord-api-types/v10";
+import { ChannelType, type GatewayPresenceUpdate } from "discord-api-types/v10";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../../config/config.js";
 import type { DiscordAccountConfig } from "../../config/types.discord.js";
@@ -219,6 +219,43 @@ describe("agent components", () => {
       expect.stringContaining("hello%2G"),
       expect.any(Object),
     );
+  });
+
+  it("blocks agent buttons in group DMs when groupEnabled is unset", async () => {
+    const button = createAgentComponentButton({
+      cfg: createCfg(),
+      accountId: "default",
+      dmPolicy: "open",
+      discordConfig: {} as DiscordAccountConfig,
+    });
+    const { interaction, reply } = createDmButtonInteraction({
+      channel: { id: "group-dm-1", type: ChannelType.GroupDM },
+    });
+
+    await button.run(interaction, { componentId: "hello" } as ComponentData);
+
+    expect(reply).toHaveBeenCalledWith({ content: "Discord group DMs are disabled." });
+    expect(enqueueSystemEventMock).not.toHaveBeenCalled();
+  });
+
+  it("blocks agent buttons in group DMs that are not in groupChannels", async () => {
+    const button = createAgentComponentButton({
+      cfg: createCfg(),
+      accountId: "default",
+      dmPolicy: "open",
+      discordConfig: {
+        dm: { groupEnabled: true, groupChannels: ["allowed-group-dm"] },
+      } as DiscordAccountConfig,
+    });
+    const { interaction, reply } = createDmButtonInteraction({
+      channel: { id: "blocked-group-dm", type: ChannelType.GroupDM },
+      rawData: { channel_id: "blocked-group-dm" },
+    });
+
+    await button.run(interaction, { componentId: "hello" } as ComponentData);
+
+    expect(reply).toHaveBeenCalledWith({ content: "This group DM is not allowed." });
+    expect(enqueueSystemEventMock).not.toHaveBeenCalled();
   });
 });
 
@@ -498,6 +535,81 @@ describe("discord component interactions", () => {
 
     expect(acknowledge).toHaveBeenCalledTimes(1);
     expect(resolveDiscordModalEntry({ id: "mdl_1", consume: false })).not.toBeNull();
+  });
+
+  it("blocks group DM button interactions when groupEnabled is unset", async () => {
+    registerDiscordComponentEntries({
+      entries: [createButtonEntry()],
+      modals: [],
+    });
+
+    const button = createDiscordComponentButton(
+      createComponentContext({
+        dmPolicy: "open",
+        discordConfig: createDiscordConfig(),
+      }),
+    );
+    const { interaction, reply } = createComponentButtonInteraction({
+      channel: { id: "group-dm-1", type: ChannelType.GroupDM },
+      rawData: { channel_id: "group-dm-1", id: "interaction-group-dm-disabled" },
+    });
+
+    await button.run(interaction, { cid: "btn_1" } as ComponentData);
+
+    expect(reply).toHaveBeenCalledWith({ content: "Discord group DMs are disabled." });
+    expect(dispatchReplyMock).not.toHaveBeenCalled();
+  });
+
+  it("blocks group DM button interactions when the channel is not allowlisted", async () => {
+    registerDiscordComponentEntries({
+      entries: [createButtonEntry()],
+      modals: [],
+    });
+
+    const button = createDiscordComponentButton(
+      createComponentContext({
+        dmPolicy: "open",
+        discordConfig: createDiscordConfig({
+          dm: { groupEnabled: true, groupChannels: ["allowed-group-dm"] },
+        }),
+      }),
+    );
+    const { interaction, reply } = createComponentButtonInteraction({
+      channel: { id: "blocked-group-dm", type: ChannelType.GroupDM },
+      rawData: { channel_id: "blocked-group-dm", id: "interaction-group-dm-denied" },
+    });
+
+    await button.run(interaction, { cid: "btn_1" } as ComponentData);
+
+    expect(reply).toHaveBeenCalledWith({ content: "This group DM is not allowed." });
+    expect(dispatchReplyMock).not.toHaveBeenCalled();
+  });
+
+  it("dispatches group DM button interactions when the channel is allowlisted", async () => {
+    registerDiscordComponentEntries({
+      entries: [createButtonEntry()],
+      modals: [],
+    });
+
+    const button = createDiscordComponentButton(
+      createComponentContext({
+        dmPolicy: "open",
+        discordConfig: createDiscordConfig({
+          dm: { groupEnabled: true, groupChannels: ["allowed-group-dm"] },
+        }),
+      }),
+    );
+    const { interaction, reply } = createComponentButtonInteraction({
+      channel: { id: "allowed-group-dm", type: ChannelType.GroupDM },
+      rawData: { channel_id: "allowed-group-dm", id: "interaction-group-dm-allowed" },
+    });
+
+    await button.run(interaction, { cid: "btn_1" } as ComponentData);
+
+    expect(reply).toHaveBeenCalledWith({ content: "✓" });
+    expect(dispatchReplyMock).toHaveBeenCalledTimes(1);
+    expect(lastDispatchCtx?.ChatType).toBe("group");
+    expect(lastDispatchCtx?.From).toBe("discord:group:allowed-group-dm");
   });
 });
 

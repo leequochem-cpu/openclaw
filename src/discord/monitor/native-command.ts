@@ -64,6 +64,7 @@ import {
   resolveDiscordGuildEntry,
   resolveDiscordMemberAccessState,
   resolveDiscordOwnerAccess,
+  resolveGroupDmAllow,
 } from "./allow-list.js";
 import { resolveDiscordDmCommandAccess } from "./dm-command-auth.js";
 import { handleDiscordDmCommandDecision } from "./dm-command-decision.js";
@@ -1497,8 +1498,21 @@ async function dispatchDiscordCommandInteraction(params: {
       return;
     }
   }
-  if (isGroupDm && discordConfig?.dm?.groupEnabled === false) {
+  const groupDmEnabled = discordConfig?.dm?.groupEnabled ?? false;
+  if (isGroupDm && !groupDmEnabled) {
     await respond("Discord group DMs are disabled.");
+    return;
+  }
+  if (
+    isGroupDm &&
+    !resolveGroupDmAllow({
+      channels: discordConfig?.dm?.groupChannels,
+      channelId: rawChannelId,
+      channelName,
+      channelSlug,
+    })
+  ) {
+    await respond("This group DM is not allowed.");
     return;
   }
 
