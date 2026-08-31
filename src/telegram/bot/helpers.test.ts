@@ -6,9 +6,11 @@ import {
   expandTextLinks,
   getTelegramTextParts,
   hasBotMention,
+  isTelegramGroupChatType,
   normalizeForwardedContext,
   resolveTelegramDirectPeerId,
   resolveTelegramForumThreadId,
+  withTelegramChannelAsGroupMessage,
 } from "./helpers.js";
 
 describe("resolveTelegramForumThreadId", () => {
@@ -53,6 +55,31 @@ describe("buildTypingThreadParams", () => {
     { input: 1, expected: { message_thread_id: 1 } },
   ])("builds typing params", ({ input, expected }) => {
     expect(buildTypingThreadParams(input)).toEqual(expected);
+  });
+});
+
+describe("isTelegramGroupChatType", () => {
+  it("treats groups, supergroups, and channels as group chats", () => {
+    expect(isTelegramGroupChatType("group")).toBe(true);
+    expect(isTelegramGroupChatType("supergroup")).toBe(true);
+    expect(isTelegramGroupChatType("channel")).toBe(true);
+    expect(isTelegramGroupChatType("private")).toBe(false);
+    expect(isTelegramGroupChatType(undefined)).toBe(false);
+  });
+});
+
+describe("withTelegramChannelAsGroupMessage", () => {
+  it("remaps channel messages to supergroup without changing other chats", () => {
+    expect(
+      withTelegramChannelAsGroupMessage({
+        chat: { id: -1001, type: "channel", title: "News" },
+      }).chat.type,
+    ).toBe("supergroup");
+    expect(
+      withTelegramChannelAsGroupMessage({
+        chat: { id: 42, type: "private" },
+      }).chat.type,
+    ).toBe("private");
   });
 });
 
