@@ -193,6 +193,30 @@ export function resolveTelegramDirectPeerId(params: {
   return String(params.chatId);
 }
 
+/** Groups, supergroups, and channels share groupPolicy (not DM pairing). */
+export function isTelegramGroupChatType(type: string | undefined): boolean {
+  return type === "group" || type === "supergroup" || type === "channel";
+}
+
+/**
+ * Channel posts/callbacks keep `chat.type === "channel"`. Downstream inbound
+ * code keys group vs DM off group/supergroup, so remap before processMessage.
+ */
+export function withTelegramChannelAsGroupMessage<T extends { chat: { type: string } }>(
+  message: T,
+): T {
+  if (message.chat.type !== "channel") {
+    return message;
+  }
+  return {
+    ...message,
+    chat: {
+      ...message.chat,
+      type: "supergroup",
+    },
+  };
+}
+
 export function buildTelegramGroupFrom(chatId: number | string, messageThreadId?: number) {
   return `telegram:group:${buildTelegramGroupPeerId(chatId, messageThreadId)}`;
 }

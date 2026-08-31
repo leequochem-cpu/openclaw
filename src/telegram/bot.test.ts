@@ -366,6 +366,98 @@ describe("createTelegramBot", () => {
     expect(answerCallbackQuerySpy).toHaveBeenCalledWith("cbq-4");
   });
 
+  it("does not treat channel callbacks as paired DMs", async () => {
+    onSpy.mockClear();
+    replySpy.mockClear();
+    readChannelAllowFromStore.mockResolvedValue(["42"]);
+
+    const telegramConfig = {
+      dmPolicy: "pairing" as const,
+      allowFrom: [],
+      groupPolicy: "allowlist" as const,
+      groups: {},
+      capabilities: { inlineButtons: "allowlist" as const },
+    };
+    loadConfig.mockReturnValue({
+      agents: { defaults: { envelopeTimezone: "utc" } },
+      channels: { telegram: telegramConfig },
+    });
+    createTelegramBot({
+      token: "tok",
+      config: { channels: { telegram: telegramConfig } },
+    });
+    const callbackHandler = onSpy.mock.calls.find((call) => call[0] === "callback_query")?.[1] as (
+      ctx: Record<string, unknown>,
+    ) => Promise<void>;
+    expect(callbackHandler).toBeDefined();
+
+    await callbackHandler({
+      callbackQuery: {
+        id: "cbq-channel-dm-bypass",
+        data: "/reset",
+        from: { id: 42, first_name: "Ada", username: "ada_bot" },
+        message: {
+          chat: { id: -100555000, type: "channel", title: "Public Channel" },
+          date: 1736380800,
+          message_id: 88,
+        },
+      },
+      me: { username: "openclaw_bot" },
+      getFile: async () => ({ download: async () => new Uint8Array() }),
+    });
+
+    expect(replySpy).not.toHaveBeenCalled();
+    expect(answerCallbackQuerySpy).toHaveBeenCalledWith("cbq-channel-dm-bypass");
+  });
+
+  it("routes allowlisted channel callbacks into the channel group session", async () => {
+    onSpy.mockClear();
+    replySpy.mockClear();
+    readChannelAllowFromStore.mockResolvedValue(["42"]);
+
+    const telegramConfig = {
+      dmPolicy: "pairing" as const,
+      allowFrom: [],
+      groupPolicy: "open" as const,
+      groups: { "-100555000": { requireMention: false } },
+      capabilities: { inlineButtons: "all" as const },
+    };
+    loadConfig.mockReturnValue({
+      agents: { defaults: { envelopeTimezone: "utc" } },
+      channels: { telegram: telegramConfig },
+    });
+    createTelegramBot({
+      token: "tok",
+      config: { channels: { telegram: telegramConfig } },
+    });
+    const callbackHandler = onSpy.mock.calls.find((call) => call[0] === "callback_query")?.[1] as (
+      ctx: Record<string, unknown>,
+    ) => Promise<void>;
+    expect(callbackHandler).toBeDefined();
+
+    await callbackHandler({
+      callbackQuery: {
+        id: "cbq-channel-group-route",
+        data: "hello from channel button",
+        from: { id: 42, first_name: "Ada", username: "ada_bot" },
+        message: {
+          chat: { id: -100555000, type: "channel", title: "Public Channel" },
+          date: 1736380800,
+          message_id: 89,
+        },
+      },
+      me: { username: "openclaw_bot" },
+      getFile: async () => ({ download: async () => new Uint8Array() }),
+    });
+
+    expect(replySpy).toHaveBeenCalledTimes(1);
+    const payload = replySpy.mock.calls[0]?.[0] as { ChatType?: string; From?: string };
+    expect(payload.ChatType).toBe("group");
+    expect(payload.From).toContain("telegram:group:-100555000");
+    expect(payload.From).not.toBe("telegram:42");
+    expect(answerCallbackQuerySpy).toHaveBeenCalledWith("cbq-channel-group-route");
+  });
+
   it("routes compact model callbacks by inferring provider", async () => {
     onSpy.mockClear();
     replySpy.mockClear();

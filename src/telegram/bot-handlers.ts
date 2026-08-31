@@ -51,8 +51,10 @@ import {
   getTelegramTextParts,
   buildTelegramGroupPeerId,
   buildTelegramParentPeer,
+  isTelegramGroupChatType,
   resolveTelegramForumThreadId,
   resolveTelegramGroupAllowFromContext,
+  withTelegramChannelAsGroupMessage,
 } from "./bot/helpers.js";
 import type { TelegramContext } from "./bot/types.js";
 import { resolveTelegramConversationRoute } from "./conversation-route.js";
@@ -749,7 +751,7 @@ export const registerTelegramHandlers = ({
       const user = reaction.user;
       const senderId = user?.id != null ? String(user.id) : "";
       const senderUsername = user?.username ?? "";
-      const isGroup = reaction.chat.type === "group" || reaction.chat.type === "supergroup";
+      const isGroup = isTelegramGroupChatType(reaction.chat.type);
       const isForum = reaction.chat.is_forum === true;
 
       // Resolve reaction notification mode (default: "own").
@@ -768,6 +770,13 @@ export const registerTelegramHandlers = ({
         isGroup,
         isForum,
       });
+      if (
+        reaction.chat.type === "channel" &&
+        (!eventAuthContext.groupConfig || eventAuthContext.groupConfig.enabled === false)
+      ) {
+        logVerbose(`Blocked telegram channel reaction ${chatId} (channel disabled)`);
+        return;
+      }
       const senderAuthorization = authorizeTelegramEventSender({
         chatId,
         chatTitle: reaction.chat.title,
@@ -1108,8 +1117,8 @@ export const registerTelegramHandlers = ({
       }
 
       const chatId = callbackMessage.chat.id;
-      const isGroup =
-        callbackMessage.chat.type === "group" || callbackMessage.chat.type === "supergroup";
+      const isChannel = callbackMessage.chat.type === "channel";
+      const isGroup = isTelegramGroupChatType(callbackMessage.chat.type);
       if (inlineButtonsScope === "dm" && isGroup) {
         return;
       }
@@ -1126,6 +1135,10 @@ export const registerTelegramHandlers = ({
         messageThreadId,
       });
       const { resolvedThreadId, dmThreadId, storeAllowFrom, groupConfig } = eventAuthContext;
+      if (isChannel && (!groupConfig || groupConfig.enabled === false)) {
+        logVerbose(`Blocked telegram channel callback ${chatId} (channel disabled)`);
+        return;
+      }
       const requireTopic = (groupConfig as { requireTopic?: boolean } | undefined)?.requireTopic;
       if (!isGroup && requireTopic === true && dmThreadId == null) {
         logVerbose(
@@ -1309,7 +1322,7 @@ export const registerTelegramHandlers = ({
           }
           // Process model selection as a synthetic message with /model command
           const syntheticMessage = buildSyntheticTextMessage({
-            base: callbackMessage,
+            base: withTelegramChannelAsGroupMessage(callbackMessage),
             from: callback.from,
             text: `/model ${selection.provider}/${selection.model}`,
           });
@@ -1324,7 +1337,7 @@ export const registerTelegramHandlers = ({
       }
 
       const syntheticMessage = buildSyntheticTextMessage({
-        base: callbackMessage,
+        base: withTelegramChannelAsGroupMessage(callbackMessage),
         from: callback.from,
         text: data,
       });
@@ -1498,7 +1511,7 @@ export const registerTelegramHandlers = ({
       ctx: buildSyntheticContext(ctx, msg),
       msg,
       chatId: msg.chat.id,
-      isGroup: msg.chat.type === "group" || msg.chat.type === "supergroup",
+      isGroup: isTelegramGroupChatType(msg.chat.type),
       isForum: msg.chat.is_forum === true,
       messageThreadId: msg.message_thread_id,
       senderId: msg.from?.id != null ? String(msg.from.id) : "",
