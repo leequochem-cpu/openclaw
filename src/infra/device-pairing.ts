@@ -181,6 +181,27 @@ function mergePendingDevicePairingRequest(
   };
 }
 
+/** True when incoming pending pairing requests new roles/scopes beyond the existing pending set. */
+function isPendingPairingPrivilegeEscalation(
+  existing: DevicePairingPendingRequest,
+  incoming: Omit<DevicePairingPendingRequest, "requestId" | "ts" | "isRepair">,
+): boolean {
+  const existingRoles = new Set(mergeRoles(existing.roles, existing.role) ?? []);
+  const incomingRoles = mergeRoles(incoming.roles, incoming.role) ?? [];
+  if (incomingRoles.some((role) => !existingRoles.has(role))) {
+    return true;
+  }
+  const existingScopes = normalizeDeviceAuthScopes(existing.scopes);
+  const incomingScopes = normalizeDeviceAuthScopes(incoming.scopes);
+  if (incomingScopes.length === 0) {
+    return false;
+  }
+  if (existingScopes.length === 0) {
+    return true;
+  }
+  return !scopesAllowWithImplications(incomingScopes, existingScopes);
+}
+
 function scopesAllow(requested: string[], allowed: string[]): boolean {
   if (requested.length === 0) {
     return true;
@@ -289,6 +310,19 @@ export async function requestDevicePairing(
     );
     if (existing) {
       const merged = mergePendingDevicePairingRequest(existing, req, isRepair);
+      // Privilege escalation must mint a new requestId + created=true so operators
+      // get a fresh pair.requested broadcast and approving the stale id cannot escalate.
+      if (isPendingPairingPrivilegeEscalation(existing, req)) {
+        delete state.pendingById[existing.requestId];
+        const escalated: DevicePairingPendingRequest = {
+          ...merged,
+          requestId: randomUUID(),
+          ts: Date.now(),
+        };
+        state.pendingById[escalated.requestId] = escalated;
+        await persistState(state, baseDir);
+        return { status: "pending" as const, request: escalated, created: true };
+      }
       state.pendingById[existing.requestId] = merged;
       await persistState(state, baseDir);
       return { status: "pending" as const, request: merged, created: false };
@@ -529,6 +563,15 @@ export async function ensureDeviceToken(params: {
       if (roleScopesAllow({ role, requestedScopes, allowedScopes: existing.scopes })) {
         return existing;
       }
+    }
+    // Align with rotateDeviceToken: never mint scopes beyond the approved baseline.
+    // Pairing/scope-upgrade checks usually gate this, but skipPairing paths
+    // (trusted-proxy / dangerouslyDisableDeviceAuth) must not persist an escalation.
+    const approvedScopes = normalizeDeviceAuthScopes(
+      device.approvedScopes ?? device.scopes ?? existing?.scopes,
+    );
+    if (!scopesAllowWithImplications(requestedScopes, approvedScopes)) {
+      return existing && !existing.revokedAtMs ? existing : null;
     }
     const now = Date.now();
     const next = buildDeviceAuthToken({

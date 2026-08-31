@@ -5,6 +5,7 @@ import { describe, expect, test } from "vitest";
 import {
   approveDevicePairing,
   clearDevicePairing,
+  ensureDeviceToken,
   getPairedDevice,
   removePairedDevice,
   requestDevicePairing,
@@ -95,15 +96,37 @@ describe("device pairing tokens", () => {
       baseDir,
     );
 
-    expect(second.created).toBe(false);
-    expect(second.request.requestId).toBe(first.request.requestId);
+    // Privilege escalation rotates requestId so a stale approve of the first id fails.
+    expect(second.created).toBe(true);
+    expect(second.request.requestId).not.toBe(first.request.requestId);
     expect(second.request.roles).toEqual(["node", "operator"]);
     expect(second.request.scopes).toEqual(["operator.read", "operator.write"]);
+    expect(await approveDevicePairing(first.request.requestId, baseDir)).toBeNull();
 
-    await approveDevicePairing(first.request.requestId, baseDir);
+    await approveDevicePairing(second.request.requestId, baseDir);
     const paired = await getPairedDevice("device-1", baseDir);
     expect(paired?.roles).toEqual(["node", "operator"]);
     expect(paired?.scopes).toEqual(["operator.read", "operator.write"]);
+  });
+
+  test("rejects ensureDeviceToken scope escalation beyond approvedScopes", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "openclaw-device-pairing-"));
+    await setupPairedOperatorDevice(baseDir, ["operator.read"]);
+    const before = await getPairedDevice("device-1", baseDir);
+
+    const ensured = await ensureDeviceToken({
+      deviceId: "device-1",
+      role: "operator",
+      scopes: ["operator.admin"],
+      baseDir,
+    });
+    expect(ensured?.token).toEqual(before?.tokens?.operator?.token);
+    expect(ensured?.scopes).toEqual(["operator.read"]);
+
+    const after = await getPairedDevice("device-1", baseDir);
+    expect(after?.tokens?.operator?.token).toEqual(before?.tokens?.operator?.token);
+    expect(after?.tokens?.operator?.scopes).toEqual(["operator.read"]);
+    expect(after?.approvedScopes).toEqual(["operator.read"]);
   });
 
   test("generates base64url device tokens with 256-bit entropy output length", async () => {

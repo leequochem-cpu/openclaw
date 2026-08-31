@@ -1473,6 +1473,56 @@ describe("initSessionState preserves behavior overrides across /new and /reset",
     archiveSpy.mockRestore();
   });
 
+  it("skips transcript archive on /new when previous embedded run stays active", async () => {
+    const storePath = await createStorePath("openclaw-archive-active-");
+    const sessionKey = "agent:main:telegram:dm:user-archive-active";
+    const existingSessionId = "existing-session-still-active";
+    await seedSessionStoreWithOverrides({
+      storePath,
+      sessionKey,
+      sessionId: existingSessionId,
+      overrides: { verboseLevel: "on" },
+    });
+
+    const piEmbedded = await import("../../agents/pi-embedded.js");
+    const sessionUtils = await import("../../gateway/session-utils.fs.js");
+    const isActiveSpy = vi.spyOn(piEmbedded, "isEmbeddedPiRunActive").mockReturnValue(true);
+    const abortSpy = vi.spyOn(piEmbedded, "abortEmbeddedPiRun").mockReturnValue(true);
+    const waitSpy = vi.spyOn(piEmbedded, "waitForEmbeddedPiRunEnd").mockResolvedValue(false);
+    const archiveSpy = vi.spyOn(sessionUtils, "archiveSessionTranscripts");
+
+    const cfg = {
+      session: { store: storePath, idleMinutes: 999 },
+    } as OpenClawConfig;
+
+    const result = await initSessionState({
+      ctx: {
+        Body: "/new",
+        RawBody: "/new",
+        CommandBody: "/new",
+        From: "user-archive-active",
+        To: "bot",
+        ChatType: "direct",
+        SessionKey: sessionKey,
+        Provider: "telegram",
+        Surface: "telegram",
+      },
+      cfg,
+      commandAuthorized: true,
+    });
+
+    expect(result.isNewSession).toBe(true);
+    expect(result.resetTriggered).toBe(true);
+    expect(abortSpy).toHaveBeenCalledWith(existingSessionId);
+    expect(waitSpy).toHaveBeenCalledWith(existingSessionId, expect.any(Number));
+    expect(archiveSpy).not.toHaveBeenCalled();
+
+    isActiveSpy.mockRestore();
+    abortSpy.mockRestore();
+    waitSpy.mockRestore();
+    archiveSpy.mockRestore();
+  });
+
   it("archives the old session transcript on daily/scheduled reset (stale session)", async () => {
     // Daily resets occur when the session becomes stale (not via /new or /reset command).
     // Previously, previousSessionEntry was only set when resetTriggered=true, leaving

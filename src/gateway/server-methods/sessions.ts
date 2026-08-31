@@ -39,6 +39,7 @@ import {
 import {
   archiveFileOnDisk,
   archiveSessionTranscripts,
+  selectTranscriptLinesForCompaction,
   listSessionsFromStore,
   loadCombinedSessionStoreForGateway,
   loadSessionEntry,
@@ -708,7 +709,8 @@ export const sessionsHandlers: GatewayRequestHandlers = {
 
     const raw = fs.readFileSync(filePath, "utf-8");
     const lines = raw.split(/\r?\n/).filter((l) => l.trim().length > 0);
-    if (lines.length <= maxLines) {
+    const { keptLines, compacted } = selectTranscriptLinesForCompaction(lines, maxLines);
+    if (!compacted) {
       respond(
         true,
         {
@@ -723,7 +725,6 @@ export const sessionsHandlers: GatewayRequestHandlers = {
     }
 
     const archived = archiveFileOnDisk(filePath, "bak");
-    const keptLines = lines.slice(-maxLines);
     fs.writeFileSync(filePath, `${keptLines.join("\n")}\n`, "utf-8");
 
     await updateSessionStore(storePath, (store) => {

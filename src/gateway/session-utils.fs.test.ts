@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { SessionManager } from "@mariozechner/pi-coding-agent";
 import { afterAll, afterEach, beforeAll, describe, expect, test, vi } from "vitest";
 import { createToolSummaryPreviewTranscriptLines } from "./session-preview.test-helpers.js";
 import {
@@ -11,6 +12,7 @@ import {
   readSessionTitleFieldsFromTranscript,
   readSessionPreviewItemsFromTranscript,
   resolveSessionTranscriptCandidates,
+  selectTranscriptLinesForCompaction,
 } from "./session-utils.fs.js";
 
 function registerTempSessionStore(
@@ -785,5 +787,96 @@ describe("archiveSessionTranscripts", () => {
     expect(archived).toHaveLength(1);
     expect(archived[0]).toContain(".deleted.");
     expect(fs.existsSync(transcriptPath)).toBe(false);
+  });
+});
+
+describe("selectTranscriptLinesForCompaction", () => {
+  test("preserves leading session header when truncating", () => {
+    const header = JSON.stringify({ type: "session", id: "sess-keep", version: 3 });
+    const lines = [
+      header,
+      ...Array.from({ length: 8 }, (_, i) =>
+        JSON.stringify({
+          type: "message",
+          id: `m${i}`,
+          parentId: i === 0 ? "sess-keep" : `m${i - 1}`,
+          message: { role: "user", content: `line ${i}` },
+        }),
+      ),
+    ];
+    const { keptLines, compacted } = selectTranscriptLinesForCompaction(lines, 4);
+    expect(compacted).toBe(true);
+    expect(keptLines).toHaveLength(4);
+    expect(keptLines[0]).toBe(header);
+    expect(keptLines.at(-1)).toContain("line 7");
+  });
+
+  test("keeps only the session header when maxLines is 1", () => {
+    const header = JSON.stringify({ type: "session", id: "sess-one", version: 3 });
+    const lines = [
+      header,
+      JSON.stringify({ type: "message", id: "m0", parentId: "sess-one" }),
+      JSON.stringify({ type: "message", id: "m1", parentId: "m0" }),
+    ];
+    const { keptLines, compacted } = selectTranscriptLinesForCompaction(lines, 1);
+    expect(compacted).toBe(true);
+    expect(keptLines).toEqual([header]);
+  });
+
+  test("falls back to last N lines when no session header exists", () => {
+    const lines = Array.from({ length: 5 }, (_, i) =>
+      JSON.stringify({ role: "user", content: `line ${i}` }),
+    );
+    const { keptLines, compacted } = selectTranscriptLinesForCompaction(lines, 3);
+    expect(compacted).toBe(true);
+    expect(keptLines).toHaveLength(3);
+    expect(keptLines[0]).toContain("line 2");
+  });
+
+  test("does not compact when already within maxLines", () => {
+    const lines = ["a", "b", "c"];
+    const { keptLines, compacted } = selectTranscriptLinesForCompaction(lines, 5);
+    expect(compacted).toBe(false);
+    expect(keptLines).toEqual(lines);
+  });
+
+  test("SessionManager.open retains compacted history when header is preserved", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-compact-header-"));
+    const file = path.join(dir, "sess.jsonl");
+    try {
+      const header = {
+        type: "session",
+        id: "sess-keep",
+        version: 3,
+        timestamp: new Date().toISOString(),
+        cwd: dir,
+      };
+      const rows = [
+        header,
+        ...Array.from({ length: 10 }, (_, i) => ({
+          type: "message",
+          id: `m${i}`,
+          parentId: i === 0 ? header.id : `m${i - 1}`,
+          timestamp: new Date().toISOString(),
+          message: {
+            role: i % 2 === 0 ? "user" : "assistant",
+            content: [{ type: "text", text: `line ${i}` }],
+            timestamp: Date.now(),
+          },
+        })),
+      ];
+      const lines = rows.map((row) => JSON.stringify(row));
+      const { keptLines, compacted } = selectTranscriptLinesForCompaction(lines, 5);
+      expect(compacted).toBe(true);
+      fs.writeFileSync(file, `${keptLines.join("\n")}\n`, "utf-8");
+
+      SessionManager.open(file);
+      const after = fs.readFileSync(file, "utf-8");
+      expect(after).toContain('"id":"sess-keep"');
+      expect(after).toContain("line 9");
+      expect(after.trim().split("\n").length).toBeGreaterThan(1);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

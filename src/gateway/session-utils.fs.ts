@@ -181,6 +181,40 @@ export function archiveFileOnDisk(filePath: string, reason: ArchiveFileReason): 
   return archived;
 }
 
+function isSessionHeaderLine(line: string): boolean {
+  try {
+    const entry = JSON.parse(line) as { type?: unknown; id?: unknown };
+    return entry.type === "session" && typeof entry.id === "string" && entry.id.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Choose lines to keep for gateway `sessions.compact`.
+ * Always retain a leading Pi session header when present — without it,
+ * SessionManager.open treats the file as corrupt and rewrites an empty session.
+ */
+export function selectTranscriptLinesForCompaction(
+  lines: string[],
+  maxLines: number,
+): { keptLines: string[]; compacted: boolean } {
+  const limit = Math.max(1, Math.floor(maxLines));
+  if (lines.length <= limit) {
+    return { keptLines: lines, compacted: false };
+  }
+  const hasHeader = lines.length > 0 && isSessionHeaderLine(lines[0]);
+  if (!hasHeader) {
+    return { keptLines: lines.slice(-limit), compacted: true };
+  }
+  if (limit === 1) {
+    return { keptLines: [lines[0]], compacted: true };
+  }
+  const body = lines.slice(1);
+  const keptBody = body.slice(-(limit - 1));
+  return { keptLines: [lines[0], ...keptBody], compacted: true };
+}
+
 /**
  * Archives all transcript files for a given session.
  * Best-effort: silently skips files that don't exist or fail to rename.
