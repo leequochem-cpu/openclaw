@@ -345,6 +345,19 @@ describe("resolveReactionSyntheticEvent", () => {
     });
   });
 
+  it("treats native topic_group reactions as group chats", async () => {
+    const result = await resolveReactionWithLookup({
+      event: makeReactionEvent({
+        chat_id: "oc_topic_group",
+        chat_type: "topic_group",
+      }),
+      lookupChatId: "oc_group_from_lookup",
+    });
+
+    expect(result?.message.chat_id).toBe("oc_topic_group");
+    expect(result?.message.chat_type).toBe("topic_group");
+  });
+
   it("falls back to reacted message chat_id when event chat_id is absent", async () => {
     const result = await resolveReactionWithLookup({
       lookupChatId: "oc_group_from_lookup",

@@ -1,4 +1,5 @@
 import type { BaseProbeResult } from "openclaw/plugin-sdk/feishu";
+import type { FeishuChatType } from "./chat-type.js";
 import type {
   FeishuConfigSchema,
   FeishuGroupSchema,
@@ -43,7 +44,7 @@ export type FeishuMessageContext = {
   senderId: string;
   senderOpenId: string;
   senderName?: string;
-  chatType: "p2p" | "group" | "private";
+  chatType: FeishuChatType;
   mentionedBot: boolean;
   hasAnyMention?: boolean;
   rootId?: string;

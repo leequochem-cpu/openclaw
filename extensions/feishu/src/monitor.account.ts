@@ -10,6 +10,7 @@ import {
   type FeishuBotAddedEvent,
 } from "./bot.js";
 import { handleFeishuCardAction, type FeishuCardActionEvent } from "./card-action.js";
+import { isFeishuGroupChat, type FeishuChatType } from "./chat-type.js";
 import { createEventDispatcher } from "./client.js";
 import {
   hasRecordedMessage,
@@ -31,7 +32,7 @@ const FEISHU_REACTION_VERIFY_TIMEOUT_MS = 1_500;
 export type FeishuReactionCreatedEvent = {
   message_id: string;
   chat_id?: string;
-  chat_type?: "p2p" | "group" | "private";
+  chat_type?: FeishuChatType;
   reaction_type?: { emoji_type?: string };
   operator_type?: string;
   user_id?: { open_id?: string };
@@ -107,8 +108,11 @@ export async function resolveReactionSyntheticEvent(
 
   const syntheticChatIdRaw = event.chat_id ?? reactedMsg.chatId;
   const syntheticChatId = syntheticChatIdRaw?.trim() ? syntheticChatIdRaw : `p2p:${senderId}`;
-  const syntheticChatType: "p2p" | "group" | "private" =
-    event.chat_type === "group" ? "group" : "p2p";
+  const syntheticChatType: FeishuChatType = isFeishuGroupChat(event.chat_type)
+    ? event.chat_type === "topic_group"
+      ? "topic_group"
+      : "group"
+    : "p2p";
   return {
     sender: {
       sender_id: { open_id: senderId },
