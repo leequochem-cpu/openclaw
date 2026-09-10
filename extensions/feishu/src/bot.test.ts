@@ -651,6 +651,91 @@ describe("handleFeishuMessage command authorization", () => {
     expect(mockDispatchReplyFromConfig).toHaveBeenCalledTimes(1);
   });
 
+  it("gates native topic_group events by groupPolicy instead of DM pairing", async () => {
+    mockShouldComputeCommandAuthorized.mockReturnValue(false);
+
+    const cfg: ClawdbotConfig = {
+      channels: {
+        feishu: {
+          dmPolicy: "pairing",
+          allowFrom: ["ou-owner"],
+          groupPolicy: "allowlist",
+          groupAllowFrom: [],
+        },
+      },
+    } as ClawdbotConfig;
+
+    const event: FeishuMessageEvent = {
+      sender: {
+        sender_id: {
+          open_id: "ou-owner",
+        },
+      },
+      message: {
+        message_id: "msg-topic-group-policy",
+        chat_id: "oc-topic-group",
+        chat_type: "topic_group",
+        message_type: "text",
+        content: JSON.stringify({ text: "hello from topic group" }),
+      },
+    };
+
+    await dispatchMessage({ cfg, event });
+
+    expect(mockDispatchReplyFromConfig).not.toHaveBeenCalled();
+    expect(mockFinalizeInboundContext).not.toHaveBeenCalled();
+    expect(mockResolveAgentRoute).not.toHaveBeenCalled();
+  });
+
+  it("routes topic_group events as group chats when groupPolicy is open", async () => {
+    mockShouldComputeCommandAuthorized.mockReturnValue(false);
+
+    const cfg: ClawdbotConfig = {
+      channels: {
+        feishu: {
+          dmPolicy: "pairing",
+          allowFrom: ["ou-owner"],
+          groupPolicy: "open",
+          groups: {
+            "oc-topic-group": {
+              requireMention: false,
+            },
+          },
+        },
+      },
+    } as ClawdbotConfig;
+
+    const event: FeishuMessageEvent = {
+      sender: {
+        sender_id: {
+          open_id: "ou-owner",
+        },
+      },
+      message: {
+        message_id: "msg-topic-group-open",
+        chat_id: "oc-topic-group",
+        chat_type: "topic_group",
+        message_type: "text",
+        content: JSON.stringify({ text: "hello from topic group" }),
+      },
+    };
+
+    await dispatchMessage({ cfg, event });
+
+    expect(mockResolveAgentRoute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        peer: { kind: "group", id: "oc-topic-group" },
+      }),
+    );
+    expect(mockFinalizeInboundContext).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ChatType: "group",
+        SenderId: "ou-owner",
+      }),
+    );
+    expect(mockDispatchReplyFromConfig).toHaveBeenCalledTimes(1);
+  });
+
   it("blocks group sender when global groupSenderAllowFrom excludes sender", async () => {
     mockShouldComputeCommandAuthorized.mockReturnValue(false);
 

@@ -14,6 +14,7 @@ import {
   warnMissingProviderGroupPolicyFallbackOnce,
 } from "openclaw/plugin-sdk/feishu";
 import { resolveFeishuAccount } from "./accounts.js";
+import { isFeishuGroupChat, type FeishuChatType } from "./chat-type.js";
 import { createFeishuClient } from "./client.js";
 import { tryRecordMessage, tryRecordMessagePersistent } from "./dedup.js";
 import { maybeCreateDynamicAgent } from "./dynamic-agent.js";
@@ -190,7 +191,7 @@ export type FeishuMessageEvent = {
     parent_id?: string;
     thread_id?: string;
     chat_id: string;
-    chat_type: "p2p" | "group" | "private";
+    chat_type: FeishuChatType;
     message_type: string;
     content: string;
     create_time?: string;
@@ -892,7 +893,7 @@ export async function handleFeishuMessage(params: {
   }
 
   let ctx = parseFeishuMessageEvent(event, botOpenId, botName);
-  const isGroup = ctx.chatType === "group";
+  const isGroup = isFeishuGroupChat(ctx.chatType);
   const isDirect = !isGroup;
   const senderUserId = event.sender.sender_id.user_id?.trim() || undefined;
 
