@@ -219,7 +219,7 @@ export async function processGatewayAllowlist(
           });
           for (const pattern of patterns) {
             if (pattern) {
-              addAllowlistEntry(approvals.file, params.agentId, pattern);
+              addAllowlistEntry(approvals.file, params.agentId, pattern, params.workdir);
             }
           }
         }

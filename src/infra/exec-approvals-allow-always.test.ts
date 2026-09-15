@@ -447,4 +447,70 @@ describe("resolveAllowAlwaysPatterns", () => {
       persistedPattern: benign,
     });
   });
+
+  it("does not reuse cwd-bound allow-always patterns in a different working directory", () => {
+    if (process.platform === "win32") {
+      return;
+    }
+    const binDir = makeTempDir();
+    const reviewedDir = makeTempDir();
+    const otherDir = makeTempDir();
+    const exe = makeExecutable(binDir, "reviewed-tool");
+    const env = makePathEnv(binDir);
+    const safeBins = resolveSafeBins([]);
+    const first = evaluateShellAllowlist({
+      command: "reviewed-tool",
+      allowlist: [],
+      safeBins,
+      cwd: reviewedDir,
+      env,
+      platform: process.platform,
+    });
+    const persisted = resolveAllowAlwaysPatterns({
+      segments: first.segments,
+      cwd: reviewedDir,
+      env,
+      platform: process.platform,
+    });
+    expect(persisted).toEqual([exe]);
+
+    const boundEntry = { pattern: exe, cwd: reviewedDir };
+    const otherDirEval = evaluateShellAllowlist({
+      command: "reviewed-tool",
+      allowlist: [boundEntry],
+      safeBins,
+      cwd: otherDir,
+      env,
+      platform: process.platform,
+    });
+    expect(otherDirEval.allowlistSatisfied).toBe(false);
+    expect(
+      requiresExecApproval({
+        ask: "on-miss",
+        security: "allowlist",
+        analysisOk: otherDirEval.analysisOk,
+        allowlistSatisfied: otherDirEval.allowlistSatisfied,
+      }),
+    ).toBe(true);
+
+    const sameDirEval = evaluateShellAllowlist({
+      command: "reviewed-tool",
+      allowlist: [boundEntry],
+      safeBins,
+      cwd: reviewedDir,
+      env,
+      platform: process.platform,
+    });
+    expect(sameDirEval.allowlistSatisfied).toBe(true);
+
+    const legacyEval = evaluateShellAllowlist({
+      command: "reviewed-tool",
+      allowlist: [{ pattern: exe }],
+      safeBins,
+      cwd: otherDir,
+      env,
+      platform: process.platform,
+    });
+    expect(legacyEval.allowlistSatisfied).toBe(true);
+  });
 });
