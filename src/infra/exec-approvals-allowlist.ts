@@ -121,6 +121,27 @@ type ExecAllowlistContext = {
   autoAllowSkills?: boolean;
 };
 
+export function normalizeExecAllowlistCwd(cwd?: string | null): string | undefined {
+  const trimmed = cwd?.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  return path.resolve(trimmed);
+}
+
+/**
+ * Legacy allowlist entries have no cwd and still apply everywhere.
+ * New allow-always entries bind the reviewed working directory.
+ */
+export function allowlistEntryAppliesToCwd(entry: ExecAllowlistEntry, cwd?: string): boolean {
+  const bound = normalizeExecAllowlistCwd(entry.cwd);
+  if (!bound) {
+    return true;
+  }
+  const actual = normalizeExecAllowlistCwd(cwd) ?? path.resolve(process.cwd());
+  return bound === actual;
+}
+
 function pickExecAllowlistContext(params: ExecAllowlistContext): ExecAllowlistContext {
   return {
     allowlist: params.allowlist,
@@ -224,7 +245,10 @@ function evaluateSegments(
       candidatePath && segment.resolution
         ? { ...segment.resolution, resolvedPath: candidatePath }
         : segment.resolution;
-    const executableMatch = matchAllowlist(params.allowlist, candidateResolution);
+    const scopedAllowlist = params.allowlist.filter((entry) =>
+      allowlistEntryAppliesToCwd(entry, params.cwd),
+    );
+    const executableMatch = matchAllowlist(scopedAllowlist, candidateResolution);
     const inlineCommand = extractShellWrapperInlineCommand(allowlistSegment.argv);
     const shellScriptCandidatePath =
       inlineCommand === null
@@ -234,7 +258,7 @@ function evaluateSegments(
           })
         : undefined;
     const shellScriptMatch = shellScriptCandidatePath
-      ? matchAllowlist(params.allowlist, {
+      ? matchAllowlist(scopedAllowlist, {
           rawExecutable: shellScriptCandidatePath,
           resolvedPath: shellScriptCandidatePath,
           executableName: path.basename(shellScriptCandidatePath),

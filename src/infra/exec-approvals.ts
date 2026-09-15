@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { DEFAULT_AGENT_ID } from "../routing/session-key.js";
+import { normalizeExecAllowlistCwd } from "./exec-approvals-allowlist.js";
 import { expandHomePrefix } from "./home-dir.js";
 import { requestJsonlSocket } from "./jsonl-socket.js";
 export * from "./exec-approvals-analysis.js";
@@ -104,6 +105,8 @@ export type ExecApprovalsDefaults = {
 export type ExecAllowlistEntry = {
   id?: string;
   pattern: string;
+  /** Working directory the pattern was approved in. Legacy entries omit this. */
+  cwd?: string;
   lastUsedAt?: number;
   lastUsedCommand?: string;
   lastResolvedPath?: string;
@@ -505,7 +508,8 @@ export function recordAllowlistUse(
   const existing = agents[target] ?? {};
   const allowlist = Array.isArray(existing.allowlist) ? existing.allowlist : [];
   const nextAllowlist = allowlist.map((item) =>
-    item.pattern === entry.pattern
+    item.pattern === entry.pattern &&
+    normalizeExecAllowlistCwd(item.cwd) === normalizeExecAllowlistCwd(entry.cwd)
       ? {
           ...item,
           id: item.id ?? crypto.randomUUID(),
@@ -524,6 +528,7 @@ export function addAllowlistEntry(
   approvals: ExecApprovalsFile,
   agentId: string | undefined,
   pattern: string,
+  cwd?: string,
 ) {
   const target = agentId ?? DEFAULT_AGENT_ID;
   const agents = approvals.agents ?? {};
@@ -533,10 +538,21 @@ export function addAllowlistEntry(
   if (!trimmed) {
     return;
   }
-  if (allowlist.some((entry) => entry.pattern === trimmed)) {
+  const normalizedCwd = normalizeExecAllowlistCwd(cwd);
+  if (
+    allowlist.some(
+      (entry) =>
+        entry.pattern === trimmed && normalizeExecAllowlistCwd(entry.cwd) === normalizedCwd,
+    )
+  ) {
     return;
   }
-  allowlist.push({ id: crypto.randomUUID(), pattern: trimmed, lastUsedAt: Date.now() });
+  allowlist.push({
+    id: crypto.randomUUID(),
+    pattern: trimmed,
+    ...(normalizedCwd ? { cwd: normalizedCwd } : {}),
+    lastUsedAt: Date.now(),
+  });
   agents[target] = { ...existing, allowlist };
   approvals.agents = agents;
   saveExecApprovals(approvals);
