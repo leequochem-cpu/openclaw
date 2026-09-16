@@ -191,6 +191,7 @@ Notes:
 - Public DMs: `channels.matrix.dm.policy="open"` plus `channels.matrix.dm.allowFrom=["*"]`.
 - `channels.matrix.dm.allowFrom` accepts full Matrix user IDs (example: `@user:server`). The wizard resolves display names to user IDs when directory search finds a single exact match.
 - Do not use display names or bare localparts (example: `"Alice"` or `"alice"`). They are ambiguous and are ignored for allowlist matching. Use full `@user:server` IDs.
+- Matrix user IDs are case-sensitive. Copy the exact `@user:server` value Matrix reports for every allowlist, approver, and owner field. Case-distinct IDs can identify different users.
 
 ## Rooms (groups)
 
@@ -215,8 +216,8 @@ Notes:
 
 - `requireMention: false` enables auto-reply in that room.
 - `groups."*"` can set defaults for mention gating across rooms.
-- `groupAllowFrom` restricts which senders can trigger the bot in rooms (full Matrix user IDs).
-- Per-room `users` allowlists can further restrict senders inside a specific room (use full Matrix user IDs).
+- `groupAllowFrom` restricts which senders can trigger the bot in rooms (full Matrix user IDs, exact casing).
+- Per-room `users` allowlists can further restrict senders inside a specific room (use full Matrix user IDs, exact casing).
 - The configure wizard prompts for room allowlists (room IDs, aliases, or names) and resolves names only on an exact, unique match.
 - On startup, OpenClaw resolves room/user names in allowlists to IDs and logs the mapping; unresolved entries are ignored for allowlist matching.
 - Invites are auto-joined by default; control with `channels.matrix.autoJoin` and `channels.matrix.autoJoinAllowlist`.
