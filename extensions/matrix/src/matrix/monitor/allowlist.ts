@@ -8,40 +8,29 @@ function normalizeAllowList(list?: Array<string | number>) {
   return normalizeStringEntries(list);
 }
 
-function normalizeMatrixUser(raw?: string | null): string {
-  const value = (raw ?? "").trim();
-  if (!value) {
-    return "";
-  }
-  if (!value.startsWith("@") || !value.includes(":")) {
-    return value.toLowerCase();
-  }
-  const withoutAt = value.slice(1);
-  const splitIndex = withoutAt.indexOf(":");
-  if (splitIndex === -1) {
-    return value.toLowerCase();
-  }
-  const localpart = withoutAt.slice(0, splitIndex).toLowerCase();
-  const server = withoutAt.slice(splitIndex + 1).toLowerCase();
-  if (!server) {
-    return value.toLowerCase();
-  }
-  return `@${localpart}:${server.toLowerCase()}`;
-}
-
-export function normalizeMatrixUserId(raw?: string | null): string {
-  const trimmed = (raw ?? "").trim();
+function stripMatrixUserPrefix(raw: string): string {
+  const trimmed = raw.trim();
   if (!trimmed) {
     return "";
   }
   const lowered = trimmed.toLowerCase();
   if (lowered.startsWith("matrix:")) {
-    return normalizeMatrixUser(trimmed.slice("matrix:".length));
+    return trimmed.slice("matrix:".length).trim();
   }
   if (lowered.startsWith("user:")) {
-    return normalizeMatrixUser(trimmed.slice("user:".length));
+    return trimmed.slice("user:".length).trim();
   }
-  return normalizeMatrixUser(trimmed);
+  return trimmed;
+}
+
+function normalizeMatrixUser(raw?: string | null): string {
+  // Matrix MXIDs are case-sensitive. Historical localparts and server names
+  // must stay exact so distinct accounts cannot fold into one allowlist identity.
+  return (raw ?? "").trim();
+}
+
+export function normalizeMatrixUserId(raw?: string | null): string {
+  return normalizeMatrixUser(stripMatrixUserPrefix(raw ?? ""));
 }
 
 function normalizeMatrixAllowListEntry(raw: string): string {
@@ -82,7 +71,7 @@ export function resolveMatrixAllowListMatch(params: {
   if (allowList.includes("*")) {
     return { allowed: true, matchKey: "*", matchSource: "wildcard" };
   }
-  const userId = normalizeMatrixUser(params.userId);
+  const userId = normalizeMatrixUserId(params.userId);
   const candidates: Array<{ value?: string; source: MatrixAllowListSource }> = [
     { value: userId, source: "id" },
     { value: userId ? `matrix:${userId}` : "", source: "prefixed-id" },

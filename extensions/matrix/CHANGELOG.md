@@ -6,6 +6,10 @@
 
 - Version alignment with core OpenClaw release numbers.
 
+### Fixes
+
+- Keep Matrix user ID authorization case-sensitive so distinct accounts cannot fold into one allowlist identity.
+
 ## 2026.3.3
 
 ### Changes
