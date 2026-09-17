@@ -397,7 +397,7 @@ export async function registerSlackMonitorSlashCommands(params: {
         }
       }
 
-      if (isRoom) {
+      if (isRoom || isGroupDm) {
         channelConfig = resolveSlackChannelConfig({
           channelId: command.channel_id,
           channelName: channelInfo?.name,
@@ -405,6 +405,8 @@ export async function registerSlackMonitorSlashCommands(params: {
           channelKeys: ctx.channelsConfigKeys,
           defaultRequireMention: ctx.defaultRequireMention,
         });
+      }
+      if (isRoom) {
         if (ctx.useAccessGroups) {
           const channelAllowlistConfigured = (ctx.channelsConfigKeys?.length ?? 0) > 0;
           const channelAllowed = channelConfig?.allowed !== false;
@@ -438,7 +440,9 @@ export async function registerSlackMonitorSlashCommands(params: {
       const sender = await ctx.resolveUserName(command.user_id);
       const senderName = sender?.name ?? command.user_name ?? command.user_id;
       const channelUsersAllowlistConfigured =
-        isRoom && Array.isArray(channelConfig?.users) && channelConfig.users.length > 0;
+        (isRoom || isGroupDm) &&
+        Array.isArray(channelConfig?.users) &&
+        channelConfig.users.length > 0;
       const channelUserAllowed = channelUsersAllowlistConfigured
         ? resolveSlackUserAllowed({
             allowList: channelConfig?.users,
