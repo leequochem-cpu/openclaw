@@ -137,15 +137,19 @@ async function resolveSlackConversationContext(params: {
   const isGroupDm = resolvedChannelType === "mpim";
   const isRoom = resolvedChannelType === "channel" || resolvedChannelType === "group";
   const isRoomish = isRoom || isGroupDm;
-  const channelConfig = isRoom
-    ? resolveSlackChannelConfig({
-        channelId: message.channel,
-        channelName,
-        channels: ctx.channelsConfig,
-        channelKeys: ctx.channelsConfigKeys,
-        defaultRequireMention: ctx.defaultRequireMention,
-      })
-    : null;
+  // Group DMs share the per-channel sender allowlist (`channels.*.users`) with
+  // rooms. Skipping this lookup treated MPIMs as unscoped and admitted any
+  // participant once `dm.groupEnabled` was on.
+  const channelConfig =
+    isRoom || isGroupDm
+      ? resolveSlackChannelConfig({
+          channelId: message.channel,
+          channelName,
+          channels: ctx.channelsConfig,
+          channelKeys: ctx.channelsConfigKeys,
+          defaultRequireMention: ctx.defaultRequireMention,
+        })
+      : null;
   const allowBots =
     channelConfig?.allowBots ??
     account.config?.allowBots ??
@@ -406,15 +410,16 @@ export async function prepareSlackMessage(params: {
   };
   const senderNameForAuth = ctx.allowNameMatching ? await resolveSenderName() : undefined;
 
-  const channelUserAuthorized = isRoom
-    ? resolveSlackUserAllowed({
-        allowList: channelConfig?.users,
-        userId: senderId,
-        userName: senderNameForAuth,
-        allowNameMatching: ctx.allowNameMatching,
-      })
-    : true;
-  if (isRoom && !channelUserAuthorized) {
+  const channelUserAuthorized =
+    isRoom || isGroupDm
+      ? resolveSlackUserAllowed({
+          allowList: channelConfig?.users,
+          userId: senderId,
+          userName: senderNameForAuth,
+          allowNameMatching: ctx.allowNameMatching,
+        })
+      : true;
+  if ((isRoom || isGroupDm) && !channelUserAuthorized) {
     logVerbose(`Blocked unauthorized slack sender ${senderId} (not in channel users)`);
     return null;
   }
@@ -434,16 +439,15 @@ export async function prepareSlackMessage(params: {
     allowNameMatching: ctx.allowNameMatching,
   }).allowed;
   const channelUsersAllowlistConfigured =
-    isRoom && Array.isArray(channelConfig?.users) && channelConfig.users.length > 0;
-  const channelCommandAuthorized =
-    isRoom && channelUsersAllowlistConfigured
-      ? resolveSlackUserAllowed({
-          allowList: channelConfig?.users,
-          userId: senderId,
-          userName: senderNameForAuth,
-          allowNameMatching: ctx.allowNameMatching,
-        })
-      : false;
+    (isRoom || isGroupDm) && Array.isArray(channelConfig?.users) && channelConfig.users.length > 0;
+  const channelCommandAuthorized = channelUsersAllowlistConfigured
+    ? resolveSlackUserAllowed({
+        allowList: channelConfig?.users,
+        userId: senderId,
+        userName: senderNameForAuth,
+        allowNameMatching: ctx.allowNameMatching,
+      })
+    : false;
   const commandGate = resolveControlCommandGate({
     useAccessGroups: ctx.useAccessGroups,
     authorizers: [

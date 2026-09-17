@@ -695,7 +695,7 @@ describe("Slack native command argument menus", () => {
 
 function createPolicyHarness(overrides?: {
   groupPolicy?: "open" | "allowlist";
-  channelsConfig?: Record<string, { allow?: boolean; requireMention?: boolean }>;
+  channelsConfig?: Record<string, { allow?: boolean; requireMention?: boolean; users?: string[] }>;
   channelId?: string;
   channelName?: string;
   allowFrom?: string[];
@@ -883,6 +883,55 @@ describe("slack slash commands channel policy", () => {
     const { respond } = await registerAndRunPolicySlash({ harness });
 
     expectChannelBlockedResponse(respond);
+  });
+
+  it("blocks group DM slash senders who are not in channels.users", async () => {
+    const harness = createPolicyHarness({
+      channelsConfig: { "*": { users: ["U_OWNER"] } },
+      channelId: "G123",
+      channelName: "mpdm-owner--mallory",
+      resolveChannelName: async () => ({ name: "mpdm-owner--mallory", type: "mpim" }),
+    });
+    const { respond } = await registerAndRunPolicySlash({
+      harness,
+      command: {
+        user_id: "U_ATTACKER",
+        user_name: "Mallory",
+        channel_id: "G123",
+        channel_name: "mpdm-owner--mallory",
+      },
+    });
+
+    expect(dispatchMock).not.toHaveBeenCalled();
+    expect(respond).toHaveBeenCalledWith({
+      text: "You are not authorized to use this command here.",
+      response_type: "ephemeral",
+    });
+  });
+
+  it("allows group DM slash senders who are in channels.users", async () => {
+    const harness = createPolicyHarness({
+      channelsConfig: { "*": { users: ["U_OWNER"] } },
+      channelId: "G123",
+      channelName: "mpdm-owner--mallory",
+      resolveChannelName: async () => ({ name: "mpdm-owner--mallory", type: "mpim" }),
+    });
+    const { respond } = await registerAndRunPolicySlash({
+      harness,
+      command: {
+        user_id: "U_OWNER",
+        user_name: "Owner",
+        channel_id: "G123",
+        channel_name: "mpdm-owner--mallory",
+      },
+    });
+
+    expect(dispatchMock).toHaveBeenCalledTimes(1);
+    expect(respond).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: "You are not authorized to use this command here.",
+      }),
+    );
   });
 });
 

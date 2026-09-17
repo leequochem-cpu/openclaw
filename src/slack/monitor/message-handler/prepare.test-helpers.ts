@@ -9,7 +9,7 @@ export function createInboundSlackTestContext(params: {
   appClient?: App["client"];
   defaultRequireMention?: boolean;
   replyToMode?: "off" | "all" | "first";
-  channelsConfig?: Record<string, { systemPrompt: string }>;
+  channelsConfig?: Record<string, { systemPrompt?: string; users?: string[]; allow?: boolean }>;
 }) {
   return createSlackMonitorContext({
     cfg: params.cfg,

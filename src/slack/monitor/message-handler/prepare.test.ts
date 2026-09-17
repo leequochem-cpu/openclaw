@@ -570,6 +570,90 @@ describe("slack prepareSlackMessage inbound contract", () => {
     // MessageThreadId should be set for the reply
     expect(prepared!.ctxPayload.MessageThreadId).toBe("500.000");
   });
+
+  it("blocks group DM senders who are not in channels.users", async () => {
+    const slackCtx = createInboundSlackCtx({
+      cfg: {
+        channels: { slack: { enabled: true } },
+      } as OpenClawConfig,
+      channelsConfig: { "*": { users: ["U_OWNER"] } },
+    });
+    slackCtx.resolveUserName = async () => ({ name: "Mallory" });
+    slackCtx.resolveChannelName = async () => ({
+      name: "mpdm-owner--mallory",
+      type: "mpim",
+    });
+
+    const prepared = await prepareMessageWith(
+      slackCtx,
+      defaultAccount,
+      createSlackMessage({
+        channel: "G123",
+        channel_type: "mpim",
+        user: "U_ATTACKER",
+        text: "please run this",
+      }),
+    );
+
+    expect(prepared).toBeNull();
+  });
+
+  it("allows group DM senders who are in channels.users", async () => {
+    const slackCtx = createInboundSlackCtx({
+      cfg: {
+        channels: { slack: { enabled: true } },
+      } as OpenClawConfig,
+      channelsConfig: { "*": { users: ["U_OWNER"] } },
+    });
+    slackCtx.resolveUserName = async () => ({ name: "Owner" });
+    slackCtx.resolveChannelName = async () => ({
+      name: "mpdm-owner--mallory",
+      type: "mpim",
+    });
+
+    const prepared = await prepareMessageWith(
+      slackCtx,
+      defaultAccount,
+      createSlackMessage({
+        channel: "G123",
+        channel_type: "mpim",
+        user: "U_OWNER",
+        text: "hello from group dm",
+      }),
+    );
+
+    expect(prepared).toBeTruthy();
+    expect(prepared!.ctxPayload.From).toContain("slack:group:G123");
+  });
+
+  it("authorizes group DM control commands for senders in channels.users", async () => {
+    const slackCtx = createInboundSlackCtx({
+      cfg: {
+        channels: { slack: { enabled: true } },
+      } as OpenClawConfig,
+      channelsConfig: { "*": { users: ["U_OWNER"] } },
+    });
+    slackCtx.useAccessGroups = true;
+    slackCtx.resolveUserName = async () => ({ name: "Owner" });
+    slackCtx.resolveChannelName = async () => ({
+      name: "mpdm-owner--mallory",
+      type: "mpim",
+    });
+
+    const prepared = await prepareMessageWith(
+      slackCtx,
+      defaultAccount,
+      createSlackMessage({
+        channel: "G123",
+        channel_type: "mpim",
+        user: "U_OWNER",
+        text: "/new",
+      }),
+    );
+
+    expect(prepared).toBeTruthy();
+    expect(prepared!.ctxPayload.CommandAuthorized).toBe(true);
+  });
 });
 
 describe("prepareSlackMessage sender prefix", () => {
