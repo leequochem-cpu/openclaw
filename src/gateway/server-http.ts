@@ -614,8 +614,16 @@ export function createGatewayHttpServer(opts: {
       strictTransportSecurity: strictTransportSecurityHeader,
     });
 
-    // Don't interfere with WebSocket upgrades; ws handles the 'upgrade' event.
+    // Real WebSocket upgrades are delivered on the HTTP server's `upgrade`
+    // event, not `request`. An `Upgrade: websocket` header here means Node
+    // treated the request as ordinary HTTP (typically a missing
+    // `Connection: upgrade`). Returning without ending the response leaks the
+    // socket and request state (GHSA-4r25-35qc-fr6j).
     if (String(req.headers.upgrade ?? "").toLowerCase() === "websocket") {
+      res.statusCode = 400;
+      res.setHeader("Connection", "close");
+      res.setHeader("Content-Type", "text/plain; charset=utf-8");
+      res.end("Bad Request");
       return;
     }
 
