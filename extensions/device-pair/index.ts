@@ -330,6 +330,7 @@ export default function register(api: OpenClawPluginApi) {
     name: "pair",
     description: "Generate setup codes and approve device pairing requests.",
     acceptsArgs: true,
+    ownerOnly: true,
     handler: async (ctx) => {
       const args = ctx.args?.trim() ?? "";
       const tokens = args.split(/\s+/).filter(Boolean);

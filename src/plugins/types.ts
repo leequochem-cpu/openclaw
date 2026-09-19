@@ -152,6 +152,8 @@ export type PluginCommandContext = {
   channelId?: ChannelId;
   /** Whether the sender is on the allowlist */
   isAuthorizedSender: boolean;
+  /** Whether the sender is a configured owner (or operator.admin on an internal channel) */
+  senderIsOwner?: boolean;
   /** Raw command arguments after the command name */
   args?: string;
   /** The full normalized command body */
@@ -198,6 +200,11 @@ export type OpenClawPluginCommandDefinition = {
   acceptsArgs?: boolean;
   /** Whether only authorized senders can use this command (default: true) */
   requireAuth?: boolean;
+  /**
+   * Restrict the command to configured owners (`commands.ownerAllowFrom`)
+   * or internal operator.admin callers. Default: false.
+   */
+  ownerOnly?: boolean;
   /** The handler function */
   handler: PluginCommandHandler;
 };

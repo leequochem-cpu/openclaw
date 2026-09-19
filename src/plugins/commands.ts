@@ -5,6 +5,8 @@
  * These commands are processed before built-in commands and before agent invocation.
  */
 
+import { resolveCommandAuthorization } from "../auto-reply/command-auth.js";
+import type { MsgContext } from "../auto-reply/templating.js";
 import type { OpenClawConfig } from "../config/config.js";
 import { logVerbose } from "../globals.js";
 import type {
@@ -240,6 +242,38 @@ function sanitizeArgs(args: string | undefined): string | undefined {
  * Note: Plugin authors should still validate and sanitize ctx.args for their
  * specific use case. This function provides basic defense-in-depth sanitization.
  */
+function resolvePluginCommandOwner(params: {
+  senderIsOwner?: boolean;
+  senderId?: string;
+  channel: string;
+  from?: string;
+  to?: string;
+  accountId?: string;
+  config: OpenClawConfig;
+  isAuthorizedSender: boolean;
+}): boolean {
+  if (params.senderIsOwner === true) {
+    return true;
+  }
+  if (params.senderIsOwner === false) {
+    return false;
+  }
+  const auth = resolveCommandAuthorization({
+    ctx: {
+      Provider: params.channel,
+      Surface: params.channel,
+      OriginatingChannel: params.channel,
+      AccountId: params.accountId,
+      From: params.from,
+      To: params.to,
+      SenderId: params.senderId,
+    } as MsgContext,
+    cfg: params.config,
+    commandAuthorized: params.isAuthorizedSender,
+  });
+  return auth.senderIsOwner;
+}
+
 export async function executePluginCommand(params: {
   command: RegisteredPluginCommand;
   args?: string;
@@ -247,6 +281,7 @@ export async function executePluginCommand(params: {
   channel: string;
   channelId?: PluginCommandContext["channelId"];
   isAuthorizedSender: boolean;
+  senderIsOwner?: boolean;
   commandBody: string;
   config: OpenClawConfig;
   from?: PluginCommandContext["from"];
@@ -255,6 +290,16 @@ export async function executePluginCommand(params: {
   messageThreadId?: PluginCommandContext["messageThreadId"];
 }): Promise<PluginCommandResult> {
   const { command, args, senderId, channel, isAuthorizedSender, commandBody, config } = params;
+  const senderIsOwner = resolvePluginCommandOwner({
+    senderIsOwner: params.senderIsOwner,
+    senderId,
+    channel,
+    from: params.from,
+    to: params.to,
+    accountId: params.accountId,
+    config,
+    isAuthorizedSender,
+  });
 
   // Check authorization
   const requireAuth = command.requireAuth !== false; // Default to true
@@ -265,6 +310,13 @@ export async function executePluginCommand(params: {
     return { text: "⚠️ This command requires authorization." };
   }
 
+  if (command.ownerOnly === true && !senderIsOwner) {
+    logVerbose(
+      `Plugin command /${command.name} blocked: non-owner sender ${senderId || "<unknown>"}`,
+    );
+    return { text: "⚠️ This command is limited to the gateway owner." };
+  }
+
   // Sanitize args before passing to handler
   const sanitizedArgs = sanitizeArgs(args);
 
@@ -273,6 +325,7 @@ export async function executePluginCommand(params: {
     channel,
     channelId: params.channelId,
     isAuthorizedSender,
+    senderIsOwner,
     args: sanitizedArgs,
     commandBody,
     config,
