@@ -353,6 +353,7 @@ Docs: https://docs.openclaw.ai
 - Discord/config schema parity: add `channels.discord.agentComponents` to the strict Zod config schema so valid `agentComponents.enabled` settings (root and account-scoped) no longer fail with unrecognized-key validation errors. Landed from contributor PR #39378 by @gambletan. Thanks @gambletan and @thewilloftheshadow.
 - ACPX/MCP session bootstrap: inject configured MCP servers into ACP `session/new` and `session/load` for acpx-backed sessions, restoring Canva and other external MCP tools. Landed from contributor PR #39337. Thanks @goodspeed-apps.
 - Control UI/Telegram sender labels: preserve inbound sender labels in sanitized chat history so dashboard user-message groups split correctly and show real group-member names instead of `You`. (#39414) Thanks @obviyus.
+- MS Teams/group sender allowlist: keep empty `groupAllowFrom` fail-closed under `groupPolicy: allowlist` even when a team/channel route allowlist is configured, so a matched route no longer synthesizes wildcard sender authorization.
 
 ## 2026.3.2
 
