@@ -240,12 +240,12 @@ export function createMSTeamsMessageHandler(deps: MSTeamsMessageHandlerDeps) {
         });
         return;
       }
+      // Route allowlists only decide which team/channel is in scope. An empty
+      // sender allowlist under groupPolicy=allowlist must fail closed instead of
+      // treating a matched route as wildcard sender authorization.
       const senderGroupAccess = evaluateSenderGroupAccessForPolicy({
         groupPolicy,
-        groupAllowFrom:
-          effectiveGroupAllowFrom.length > 0 || !channelGate.allowlistConfigured
-            ? effectiveGroupAllowFrom
-            : ["*"],
+        groupAllowFrom: effectiveGroupAllowFrom,
         senderId,
         isSenderAllowed: (_senderId, allowFrom) =>
           resolveMSTeamsAllowlistMatch({
