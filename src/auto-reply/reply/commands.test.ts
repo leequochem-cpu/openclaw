@@ -334,6 +334,110 @@ describe("/approve command", () => {
     expect(callGatewayMock).not.toHaveBeenCalled();
   });
 
+  it("rejects Discord /approve from command-authorized non-approvers", async () => {
+    const cfg = {
+      commands: { text: true, allowFrom: { discord: ["111", "222"] } },
+      channels: {
+        discord: {
+          execApprovals: { enabled: true, approvers: ["111"], target: "channel" },
+        },
+      },
+    } as OpenClawConfig;
+    const params = buildParams("/approve abc allow-once", cfg, {
+      Provider: "discord",
+      Surface: "discord",
+      SenderId: "222",
+      AccountId: "default",
+    });
+
+    callGatewayMock.mockResolvedValue({ ok: true });
+
+    const result = await handleCommands(params);
+    expect(result.shouldContinue).toBe(false);
+    expect(result.reply?.text).toContain("not authorized to approve exec requests");
+    expect(callGatewayMock).not.toHaveBeenCalled();
+  });
+
+  it("accepts Discord /approve from a configured approver", async () => {
+    const cfg = {
+      commands: { text: true, allowFrom: { discord: ["111", "222"] } },
+      channels: {
+        discord: {
+          execApprovals: { enabled: true, approvers: ["111"] },
+        },
+      },
+    } as OpenClawConfig;
+    const params = buildParams("/approve abc allow-always", cfg, {
+      Provider: "discord",
+      Surface: "discord",
+      SenderId: "111",
+    });
+
+    callGatewayMock.mockResolvedValue({ ok: true });
+
+    const result = await handleCommands(params);
+    expect(result.shouldContinue).toBe(false);
+    expect(result.reply?.text).toContain("Exec approval allow-always submitted");
+    expect(callGatewayMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: "exec.approval.resolve",
+        params: { id: "abc", decision: "allow-always" },
+      }),
+    );
+  });
+
+  it("honors account-scoped Discord exec approvers over the root list", async () => {
+    const cfg = {
+      commands: { text: true, allowFrom: { discord: ["111", "222"] } },
+      channels: {
+        discord: {
+          execApprovals: { enabled: true, approvers: ["111"] },
+          accounts: {
+            work: {
+              execApprovals: { enabled: true, approvers: ["222"] },
+            },
+          },
+        },
+      },
+    } as OpenClawConfig;
+    const params = buildParams("/approve abc allow-once", cfg, {
+      Provider: "discord",
+      Surface: "discord",
+      SenderId: "111",
+      AccountId: "work",
+    });
+
+    callGatewayMock.mockResolvedValue({ ok: true });
+
+    const result = await handleCommands(params);
+    expect(result.shouldContinue).toBe(false);
+    expect(result.reply?.text).toContain("not authorized to approve exec requests");
+    expect(callGatewayMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps Discord /approve on command auth when exec approvals are disabled", async () => {
+    const cfg = {
+      commands: { text: true, allowFrom: { discord: ["222"] } },
+      channels: {
+        discord: {
+          execApprovals: { enabled: false, approvers: ["111"] },
+        },
+      },
+    } as OpenClawConfig;
+    const params = buildParams("/approve abc deny", cfg, {
+      Provider: "discord",
+      Surface: "discord",
+      SenderId: "222",
+    });
+
+    callGatewayMock.mockResolvedValue({ ok: true });
+
+    const result = await handleCommands(params);
+    expect(result.shouldContinue).toBe(false);
+    expect(result.reply?.text).toContain("Exec approval deny submitted");
+    expect(callGatewayMock).toHaveBeenCalled();
+  });
+
   it("allows gateway clients with approvals or admin scopes", async () => {
     const cfg = {
       commands: { text: true },
