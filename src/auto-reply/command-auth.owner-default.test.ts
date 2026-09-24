@@ -75,6 +75,36 @@ describe("senderIsOwner only reflects explicit owner authorization", () => {
     expect(auth.senderIsOwner).toBe(false);
   });
 
+  it("does not inherit owner status for exec-event contexts that force a non-owner sender", () => {
+    const cfg = {
+      channels: { discord: { allowFrom: ["456"] } },
+      commands: { ownerAllowFrom: ["456"] },
+    } as OpenClawConfig;
+    const base = {
+      Provider: "exec-event",
+      OriginatingChannel: "discord",
+      Surface: "discord",
+      ChatType: "direct",
+      From: "discord:456",
+      SenderId: "456",
+      GatewayClientScopes: ["operator.admin"],
+    } as MsgContext;
+
+    const inherited = resolveCommandAuthorization({
+      ctx: base,
+      cfg,
+      commandAuthorized: true,
+    });
+    expect(inherited.senderIsOwner).toBe(true);
+
+    const suppressed = resolveCommandAuthorization({
+      ctx: { ...base, ForceSenderIsOwnerFalse: true },
+      cfg,
+      commandAuthorized: true,
+    });
+    expect(suppressed.senderIsOwner).toBe(false);
+  });
+
   it("senderIsOwner is true when ownerAllowFrom matches sender", () => {
     const cfg = {
       channels: { discord: {} },

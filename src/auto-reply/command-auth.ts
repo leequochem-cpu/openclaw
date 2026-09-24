@@ -352,7 +352,13 @@ export function resolveCommandAuthorization(params: {
     Array.isArray(ctx.GatewayClientScopes) &&
     ctx.GatewayClientScopes.includes("operator.admin");
   const ownerAllowlistConfigured = ownerAllowAll || explicitOwners.length > 0;
-  const senderIsOwner = senderIsOwnerByIdentity || senderIsOwnerByScope || ownerAllowAll;
+  // Exec-completion heartbeats reuse the delivery target as From/To. That target
+  // often matches the owner allowlist, which would grant owner-only tools to a
+  // turn driven by untrusted command output. Callers set this to keep that
+  // inheritance from crossing the owner boundary.
+  const senderIsOwner = ctx.ForceSenderIsOwnerFalse
+    ? false
+    : senderIsOwnerByIdentity || senderIsOwnerByScope || ownerAllowAll;
   const requireOwner = enforceOwner || ownerAllowlistConfigured;
   const isOwnerForCommands = !requireOwner
     ? true
