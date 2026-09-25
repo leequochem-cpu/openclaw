@@ -550,7 +550,7 @@ export function registerControlUiAndPairingSuite(): void {
     restoreGatewayToken(prevToken);
   });
 
-  test("auto-approves loopback scope upgrades for control ui clients", async () => {
+  test("requires explicit pairing for loopback control ui scope upgrades", async () => {
     const { getPairedDevice, listDevicePairing } = await import("../infra/device-pairing.js");
     const { server, ws, port, prevToken } = await startServerWithClient("secret");
     const { identity, identityPath } = await seedApprovedOperatorReadPairing({
@@ -576,11 +576,15 @@ export function registerControlUiAndPairingSuite(): void {
         nonce: nonce2,
       }),
     });
-    expect(upgraded.ok).toBe(true);
+    expect(upgraded.ok).toBe(false);
+    expect(upgraded.error?.message ?? "").toContain("pairing required");
     const pending = await listDevicePairing();
-    expect(pending.pending.filter((entry) => entry.deviceId === identity.deviceId)).toEqual([]);
+    const pendingUpgrade = pending.pending.find((entry) => entry.deviceId === identity.deviceId);
+    expect(pendingUpgrade?.silent).toBe(false);
+    expect(pendingUpgrade?.scopes ?? []).toContain("operator.admin");
     const updated = await getPairedDevice(identity.deviceId);
-    expect(updated?.tokens?.operator?.scopes).toContain("operator.admin");
+    expect(updated?.approvedScopes ?? []).toEqual(["operator.read"]);
+    expect(updated?.tokens?.operator?.scopes ?? []).not.toContain("operator.admin");
 
     ws2.close();
     await server.close();
@@ -764,7 +768,7 @@ export function registerControlUiAndPairingSuite(): void {
     }
   });
 
-  test("auto-approves local scope upgrades even when paired metadata is legacy-shaped", async () => {
+  test("does not auto-approve local scope upgrades when paired metadata is legacy-shaped", async () => {
     const { getPairedDevice, listDevicePairing } = await import("../infra/device-pairing.js");
     const { identity, identityPath } = await seedApprovedOperatorReadPairing({
       identityPrefix: "openclaw-device-legacy-",
@@ -797,22 +801,18 @@ export function registerControlUiAndPairingSuite(): void {
           nonce: upgradeNonce,
         }),
       });
-      expect(upgraded.ok).toBe(true);
-      wsUpgrade.close();
+      expect(upgraded.ok).toBe(false);
+      expect(upgraded.error?.message ?? "").toContain("pairing required");
 
       const pendingUpgrade = (await listDevicePairing()).pending.find(
         (entry) => entry.deviceId === identity.deviceId,
       );
-      expect(pendingUpgrade).toBeUndefined();
+      expect(pendingUpgrade?.silent).toBe(false);
+      expect(pendingUpgrade?.scopes ?? []).toContain("operator.admin");
       const repaired = await getPairedDevice(identity.deviceId);
-      expect(repaired?.role).toBe("operator");
-      expect(repaired?.roles ?? []).toContain("operator");
-      expect(repaired?.scopes ?? []).toEqual(
-        expect.arrayContaining(["operator.read", "operator.admin"]),
-      );
-      expect(repaired?.approvedScopes ?? []).toEqual(
-        expect.arrayContaining(["operator.read", "operator.admin"]),
-      );
+      expect(repaired?.approvedScopes ?? []).toEqual(["operator.read"]);
+      expect(repaired?.scopes ?? []).not.toContain("operator.admin");
+      expect(repaired?.tokens?.operator?.scopes ?? []).not.toContain("operator.admin");
     } finally {
       ws.close();
       ws2?.close();

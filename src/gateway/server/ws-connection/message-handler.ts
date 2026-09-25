@@ -133,10 +133,12 @@ function shouldAllowSilentLocalPairing(params: {
   isWebchat: boolean;
   reason: "not-paired" | "role-upgrade" | "scope-upgrade" | "metadata-upgrade";
 }): boolean {
+  // Scope upgrades must wait for an explicit pairing approval. Silent local
+  // reconnects previously auto-approved operator.read devices into operator.admin.
   return (
     params.isLocalClient &&
     (!params.hasBrowserOriginHeader || params.isControlUi || params.isWebchat) &&
-    (params.reason === "not-paired" || params.reason === "scope-upgrade")
+    params.reason === "not-paired"
   );
 }
 
