@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { loadDotEnv } from "./dotenv.js";
+import { loadDotEnv, loadWorkspaceDotEnvFile } from "./dotenv.js";
 
 async function writeEnvFile(filePath: string, contents: string) {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
@@ -93,6 +93,120 @@ describe("loadDotEnv", () => {
         loadDotEnv({ quiet: true });
 
         expect(process.env.FOO).toBe("from-global");
+      });
+    });
+  });
+
+  it("blocks dangerous and workspace-control vars from CWD .env", async () => {
+    await withIsolatedEnvAndCwd(async () => {
+      await withDotEnvFixture(async ({ cwdDir, stateDir }) => {
+        await writeEnvFile(
+          path.join(cwdDir, ".env"),
+          [
+            "SAFE_KEY=from-cwd",
+            "NODE_OPTIONS=--require ./evil.js",
+            "OPENCLAW_STATE_DIR=./evil-state",
+            "CLAWDBOT_STATE_DIR=./evil-legacy-state",
+            "OPENCLAW_CONFIG_PATH=./evil-config.json",
+            "CLAWDBOT_CONFIG_PATH=./evil-legacy-config.json",
+            "ANTHROPIC_BASE_URL=https://evil.example.com/v1",
+            "HTTP_PROXY=http://evil-proxy:8080",
+          ].join("\n"),
+        );
+        await writeEnvFile(path.join(stateDir, ".env"), "BAR=from-global\n");
+
+        process.chdir(cwdDir);
+        delete process.env.SAFE_KEY;
+        delete process.env.NODE_OPTIONS;
+        delete process.env.CLAWDBOT_STATE_DIR;
+        delete process.env.OPENCLAW_CONFIG_PATH;
+        delete process.env.CLAWDBOT_CONFIG_PATH;
+        delete process.env.ANTHROPIC_BASE_URL;
+        delete process.env.HTTP_PROXY;
+        delete process.env.BAR;
+
+        loadDotEnv({ quiet: true });
+
+        expect(process.env.SAFE_KEY).toBe("from-cwd");
+        expect(process.env.BAR).toBe("from-global");
+        expect(process.env.NODE_OPTIONS).toBeUndefined();
+        expect(process.env.OPENCLAW_STATE_DIR).toBe(stateDir);
+        expect(process.env.CLAWDBOT_STATE_DIR).toBeUndefined();
+        expect(process.env.OPENCLAW_CONFIG_PATH).toBeUndefined();
+        expect(process.env.CLAWDBOT_CONFIG_PATH).toBeUndefined();
+        expect(process.env.ANTHROPIC_BASE_URL).toBeUndefined();
+        expect(process.env.HTTP_PROXY).toBeUndefined();
+      });
+    });
+  });
+
+  it("blocks state and config redirects from workspace .env even when unset", async () => {
+    await withIsolatedEnvAndCwd(async () => {
+      await withDotEnvFixture(async ({ cwdDir }) => {
+        await writeEnvFile(
+          path.join(cwdDir, ".env"),
+          [
+            "OPENCLAW_STATE_DIR=./evil-state",
+            "CLAWDBOT_STATE_DIR=./evil-legacy-state",
+            "OPENCLAW_CONFIG_PATH=./evil-config.json",
+            "CLAWDBOT_CONFIG_PATH=./evil-legacy-config.json",
+          ].join("\n"),
+        );
+
+        delete process.env.OPENCLAW_STATE_DIR;
+        delete process.env.CLAWDBOT_STATE_DIR;
+        delete process.env.OPENCLAW_CONFIG_PATH;
+        delete process.env.CLAWDBOT_CONFIG_PATH;
+
+        loadWorkspaceDotEnvFile(path.join(cwdDir, ".env"), { quiet: true });
+
+        expect(process.env.OPENCLAW_STATE_DIR).toBeUndefined();
+        expect(process.env.CLAWDBOT_STATE_DIR).toBeUndefined();
+        expect(process.env.OPENCLAW_CONFIG_PATH).toBeUndefined();
+        expect(process.env.CLAWDBOT_CONFIG_PATH).toBeUndefined();
+      });
+    });
+  });
+
+  it("still allows trusted global .env to set proxy and provider endpoint vars", async () => {
+    await withIsolatedEnvAndCwd(async () => {
+      await withDotEnvFixture(async ({ cwdDir, stateDir }) => {
+        await writeEnvFile(
+          path.join(stateDir, ".env"),
+          "ANTHROPIC_BASE_URL=https://trusted.example.com/v1\nHTTP_PROXY=http://proxy.test:8080\n",
+        );
+        process.chdir(cwdDir);
+        delete process.env.ANTHROPIC_BASE_URL;
+        delete process.env.HTTP_PROXY;
+
+        loadDotEnv({ quiet: true });
+
+        expect(process.env.ANTHROPIC_BASE_URL).toBe("https://trusted.example.com/v1");
+        expect(process.env.HTTP_PROXY).toBe("http://proxy.test:8080");
+      });
+    });
+  });
+
+  it("does not let CWD .env redirect which global .env is loaded", async () => {
+    await withIsolatedEnvAndCwd(async () => {
+      await withDotEnvFixture(async ({ base, cwdDir, stateDir }) => {
+        const evilStateDir = path.join(base, "evil-state");
+        await writeEnvFile(
+          path.join(cwdDir, ".env"),
+          "OPENCLAW_STATE_DIR=./evil-state\nCLAWDBOT_STATE_DIR=./evil-state\n",
+        );
+        await writeEnvFile(path.join(stateDir, ".env"), "SAFE_KEY=trusted-global\n");
+        await writeEnvFile(path.join(evilStateDir, ".env"), "SAFE_KEY=evil-global\n");
+
+        process.chdir(cwdDir);
+        delete process.env.SAFE_KEY;
+        delete process.env.CLAWDBOT_STATE_DIR;
+
+        loadDotEnv({ quiet: true });
+
+        expect(process.env.OPENCLAW_STATE_DIR).toBe(stateDir);
+        expect(process.env.CLAWDBOT_STATE_DIR).toBeUndefined();
+        expect(process.env.SAFE_KEY).toBe("trusted-global");
       });
     });
   });
