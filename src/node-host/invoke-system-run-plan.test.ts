@@ -6,6 +6,7 @@ import { formatExecCommand } from "../infra/system-run-command.js";
 import {
   buildSystemRunApprovalPlan,
   hardenApprovedExecutionPaths,
+  revalidateApprovedMutableFileOperand,
 } from "./invoke-system-run-plan.js";
 
 type PathTokenSetup = {
@@ -175,4 +176,139 @@ describe("hardenApprovedExecutionPaths", () => {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
   });
+
+  function withRunnerPath<T>(tmp: string, names: string[], run: () => T): T {
+    const binDir = path.join(tmp, "bin");
+    fs.mkdirSync(binDir, { recursive: true });
+    for (const name of names) {
+      const runnerPath = path.join(binDir, name);
+      fs.writeFileSync(runnerPath, "#!/bin/sh\nexit 0\n");
+      fs.chmodSync(runnerPath, 0o755);
+    }
+    const oldPath = process.env.PATH;
+    process.env.PATH = `${binDir}${path.delimiter}${oldPath ?? ""}`;
+    try {
+      return run();
+    } finally {
+      if (oldPath === undefined) {
+        delete process.env.PATH;
+      } else {
+        process.env.PATH = oldPath;
+      }
+    }
+  }
+
+  it.runIf(process.platform !== "win32").each(["tsx", "jiti"])(
+    "binds %s script files so later rewrites fail approval revalidation",
+    (runner) => {
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-approval-runner-"));
+      const scriptPath = path.join(tmp, "run.ts");
+      fs.writeFileSync(scriptPath, "console.log('SAFE')\n");
+      try {
+        withRunnerPath(tmp, [runner], () => {
+          const prepared = buildSystemRunApprovalPlan({
+            command: [runner, "./run.ts"],
+            cwd: tmp,
+          });
+          expect(prepared.ok).toBe(true);
+          if (!prepared.ok) {
+            throw new Error(prepared.message);
+          }
+          const operand = prepared.plan.mutableFileOperand;
+          expect(operand).toEqual({
+            argvIndex: 1,
+            path: fs.realpathSync(scriptPath),
+            sha256: expect.any(String),
+          });
+          if (!operand) {
+            throw new Error("missing mutable file operand");
+          }
+          fs.writeFileSync(scriptPath, "console.log('PWNED')\n");
+          expect(
+            revalidateApprovedMutableFileOperand({
+              snapshot: operand,
+              argv: prepared.plan.argv,
+              cwd: tmp,
+            }),
+          ).toBe(false);
+        });
+      } finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.runIf(process.platform !== "win32")("binds a bun script after its subcommand", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-approval-bun-"));
+    const scriptPath = path.join(tmp, "run.ts");
+    fs.writeFileSync(scriptPath, "console.log('SAFE')\n");
+    try {
+      withRunnerPath(tmp, ["bun"], () => {
+        const prepared = buildSystemRunApprovalPlan({
+          command: ["bun", "run", "./run.ts"],
+          cwd: tmp,
+        });
+        expect(prepared.ok).toBe(true);
+        if (!prepared.ok) {
+          throw new Error(prepared.message);
+        }
+        expect(prepared.plan.mutableFileOperand).toMatchObject({
+          argvIndex: 2,
+          path: fs.realpathSync(scriptPath),
+        });
+      });
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it.runIf(process.platform !== "win32")(
+    "refuses interpreter approvals that do not pin exactly one script file",
+    () => {
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-approval-unbound-"));
+      const hookPath = path.join(tmp, "hook.js");
+      const scriptPath = path.join(tmp, "script.js");
+      fs.writeFileSync(hookPath, "console.log('hook')\n");
+      fs.writeFileSync(scriptPath, "console.log('script')\n");
+      try {
+        withRunnerPath(tmp, ["python3", "node", "true"], () => {
+          const inline = buildSystemRunApprovalPlan({
+            command: ["python3", "-c", "print(1)"],
+            cwd: tmp,
+          });
+          expect(inline.ok).toBe(false);
+          if (inline.ok) {
+            throw new Error("unreachable");
+          }
+          expect(inline.message).toBe(
+            "SYSTEM_RUN_DENIED: approval cannot safely bind this interpreter/runtime command",
+          );
+
+          const ambiguous = buildSystemRunApprovalPlan({
+            command: ["node", "--require", "./hook.js", "./script.js"],
+            cwd: tmp,
+          });
+          expect(ambiguous.ok).toBe(false);
+          if (ambiguous.ok) {
+            throw new Error("unreachable");
+          }
+          expect(ambiguous.message).toBe(
+            "SYSTEM_RUN_DENIED: approval cannot safely bind this interpreter/runtime command",
+          );
+
+          const ordinary = buildSystemRunApprovalPlan({
+            command: ["true", "status"],
+            cwd: tmp,
+          });
+          expect(ordinary.ok).toBe(true);
+          if (!ordinary.ok) {
+            throw new Error(ordinary.message);
+          }
+          expect(ordinary.plan.mutableFileOperand).toBeUndefined();
+        });
+      } finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+      }
+    },
+  );
 });
