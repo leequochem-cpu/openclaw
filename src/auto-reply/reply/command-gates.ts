@@ -18,6 +18,29 @@ export function rejectUnauthorizedCommand(
   return { shouldContinue: false };
 }
 
+/**
+ * Owner-only chat commands. Gateway clients stay on scope checks: `commands.allowFrom`
+ * can authorize a non-owner, and `senderIsOwner` is a separate list.
+ */
+export function rejectNonOwnerExternalCommand(
+  params: HandleCommandsParams,
+  commandLabel: string,
+): CommandHandlerResult | null {
+  if (isInternalMessageChannel(params.command.channel)) {
+    return null;
+  }
+  if (params.command.senderIsOwner) {
+    return null;
+  }
+  logVerbose(
+    `Ignoring ${commandLabel} from non-owner sender: ${params.command.senderId || "<unknown>"}`,
+  );
+  return {
+    shouldContinue: false,
+    reply: { text: `❌ ${commandLabel} is owner-only.` },
+  };
+}
+
 export function requireGatewayClientScopeForInternalChannel(
   params: HandleCommandsParams,
   config: {
