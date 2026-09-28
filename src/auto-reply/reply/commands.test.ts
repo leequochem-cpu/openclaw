@@ -9,6 +9,7 @@ import {
   resetSubagentRegistryForTests,
 } from "../../agents/subagent-registry.js";
 import type { OpenClawConfig } from "../../config/config.js";
+import { getConfigOverrides, resetConfigOverrides } from "../../config/runtime-overrides.js";
 import { updateSessionStore, type SessionEntry } from "../../config/sessions.js";
 import * as internalHooks from "../../hooks/internal-hooks.js";
 import { clearPluginCommands, registerPluginCommand } from "../../plugins/commands.js";
@@ -587,6 +588,7 @@ describe("handleCommands /config configWrites gating", () => {
       channels: { whatsapp: { allowFrom: ["*"], configWrites: false } },
     } as OpenClawConfig;
     const params = buildParams('/config set messages.ackReaction=":)"', cfg);
+    params.command.senderIsOwner = true;
     const result = await handleCommands(params);
     expect(result.shouldContinue).toBe(false);
     expect(result.reply?.text).toContain("Config writes are disabled");
@@ -648,6 +650,46 @@ describe("handleCommands /config configWrites gating", () => {
     expect(result.shouldContinue).toBe(false);
     expect(writeConfigFileMock).toHaveBeenCalledOnce();
     expect(result.reply?.text).toContain("Config updated");
+  });
+
+  it("blocks /config and /debug from command-authorized non-owners", async () => {
+    resetConfigOverrides();
+    const cfg = {
+      commands: { config: true, debug: true, text: true, ownerAllowFrom: ["owner-1"] },
+      channels: { whatsapp: { allowFrom: ["*"] } },
+    } as OpenClawConfig;
+    readConfigFileSnapshotMock.mockClear();
+    writeConfigFileMock.mockClear();
+
+    for (const commandBody of ["/config show", '/debug set messages.responsePrefix="x"']) {
+      const params = buildParams(commandBody, cfg, { SenderId: "helper-2" });
+      params.command.isAuthorizedSender = true;
+      params.command.senderIsOwner = false;
+      const result = await handleCommands(params);
+      expect(result.shouldContinue).toBe(false);
+      expect(result.reply?.text).toContain("owner-only");
+    }
+
+    expect(readConfigFileSnapshotMock).not.toHaveBeenCalled();
+    expect(writeConfigFileMock).not.toHaveBeenCalled();
+    expect(getConfigOverrides()).toEqual({});
+    resetConfigOverrides();
+  });
+
+  it("allows /config show for an external owner", async () => {
+    const cfg = {
+      commands: { config: true, text: true, ownerAllowFrom: ["owner-1"] },
+      channels: { whatsapp: { allowFrom: ["*"] } },
+    } as OpenClawConfig;
+    readConfigFileSnapshotMock.mockResolvedValueOnce({
+      valid: true,
+      parsed: { gateway: { auth: { token: "secret-token" } } },
+    });
+    const params = buildParams("/config show gateway.auth.token", cfg, { SenderId: "owner-1" });
+    params.command.senderIsOwner = true;
+    const result = await handleCommands(params);
+    expect(result.shouldContinue).toBe(false);
+    expect(result.reply?.text).toContain("secret-token");
   });
 });
 
