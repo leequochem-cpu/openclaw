@@ -238,6 +238,10 @@ OpenClaw scans, in order:
 - `<workspace>/.openclaw/extensions/*.ts`
 - `<workspace>/.openclaw/extensions/*/index.ts`
 
+Workspace copies are discovered but not executed until you explicitly trust them
+with `plugins.allow` or `plugins.entries.<id>.enabled: true`. An empty allowlist
+and the default memory slot do not enable a workspace plugin.
+
 3. Global extensions
 
 - `~/.openclaw/extensions/*.ts`

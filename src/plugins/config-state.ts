@@ -197,13 +197,19 @@ export function resolveEnableState(
   if (config.deny.includes(id)) {
     return { enabled: false, reason: "blocked by denylist" };
   }
-  if (config.allow.length > 0 && !config.allow.includes(id)) {
+  const entry = config.entries[id];
+  const explicitlyAllowed = config.allow.includes(id);
+  // Workspace copies are untrusted repo content. Do not let the default memory
+  // slot or an empty allowlist execute them before an explicit trust decision.
+  if (origin === "workspace" && !explicitlyAllowed && entry?.enabled !== true) {
+    return { enabled: false, reason: "workspace plugin (disabled by default)" };
+  }
+  if (config.allow.length > 0 && !explicitlyAllowed) {
     return { enabled: false, reason: "not in allowlist" };
   }
   if (config.slots.memory === id) {
     return { enabled: true };
   }
-  const entry = config.entries[id];
   if (entry?.enabled === true) {
     return { enabled: true };
   }
