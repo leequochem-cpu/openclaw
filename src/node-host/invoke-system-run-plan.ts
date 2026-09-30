@@ -421,9 +421,12 @@ export function buildSystemRunApprovalPlan(params: {
   if (!hardening.ok) {
     return { ok: false, message: hardening.message };
   }
-  const rawCommand = hardening.argvChanged
-    ? formatExecCommand(hardening.argv) || null
-    : command.cmdText.trim() || null;
+  // Bind the stored approval text to the exact argv that will execute. The
+  // extracted shell payload stays available as cmdText/preview so prompts can
+  // show it separately, but it must not replace the wrapper path.
+  const rawCommand = formatExecCommand(hardening.argv) || null;
+  const preview = command.previewText?.trim() ?? "";
+  const commandPreview = preview && preview !== rawCommand ? preview : null;
   const mutableFileOperand = resolveMutableFileOperandSnapshotSync({
     argv: hardening.argv,
     cwd: hardening.cwd,
@@ -441,6 +444,6 @@ export function buildSystemRunApprovalPlan(params: {
       sessionKey: normalizeString(params.sessionKey),
       mutableFileOperand: mutableFileOperand.snapshot ?? undefined,
     },
-    cmdText: rawCommand ?? formatExecCommand(hardening.argv),
+    cmdText: commandPreview ?? rawCommand ?? formatExecCommand(hardening.argv),
   };
 }

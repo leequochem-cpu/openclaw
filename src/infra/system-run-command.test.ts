@@ -194,6 +194,33 @@ describe("system run command helpers", () => {
     expect(res.cmdText).toBe('/bin/sh -lc "$0 \\"$1\\"" /usr/bin/touch /tmp/marker');
   });
 
+  test("resolveSystemRunCommand keeps wrapper preview separate from approval text", () => {
+    const res = resolveSystemRunCommand({
+      command: ["./env", "sh", "-c", "jq --version"],
+    });
+    expect(res.ok).toBe(true);
+    if (!res.ok) {
+      throw new Error("unreachable");
+    }
+    expect(res.shellCommand).toBe("jq --version");
+    expect(res.cmdText).toBe("jq --version");
+    expect(res.previewText).toBe("jq --version");
+  });
+
+  test("resolveSystemRunCommand accepts canonical full argv text for wrapper approvals", () => {
+    const res = resolveSystemRunCommand({
+      command: ["./env", "sh", "-c", "jq --version"],
+      rawCommand: './env sh -c "jq --version"',
+    });
+    expect(res.ok).toBe(true);
+    if (!res.ok) {
+      throw new Error("unreachable");
+    }
+    expect(res.cmdText).toBe('./env sh -c "jq --version"');
+    expect(res.previewText).toBe("jq --version");
+    expect(res.shellCommand).toBe("jq --version");
+  });
+
   test("resolveSystemRunCommand binds cmdText to full argv when env prelude modifies shell wrapper", () => {
     const res = resolveSystemRunCommand({
       command: ["/usr/bin/env", "BASH_ENV=/tmp/payload.sh", "bash", "-lc", "echo hi"],
