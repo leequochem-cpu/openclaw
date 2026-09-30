@@ -16,6 +16,8 @@ export type SystemRunCommandValidation =
       ok: true;
       shellCommand: string | null;
       cmdText: string;
+      /** Extracted shell payload when it differs from the exact argv text. */
+      previewText: string | null;
     }
   | {
       ok: false;
@@ -30,6 +32,8 @@ export type ResolvedSystemRunCommand =
       rawCommand: string | null;
       shellCommand: string | null;
       cmdText: string;
+      /** Extracted shell payload when it differs from the exact argv text. */
+      previewText: string | null;
     }
   | {
       ok: false;
@@ -112,35 +116,39 @@ export function validateSystemRunCommandConsistency(params: {
   const envManipulationBeforeShellWrapper =
     shellWrapperResolution.isWrapper && hasEnvManipulationBeforeShellWrapper(params.argv);
   const mustBindDisplayToFullArgv = envManipulationBeforeShellWrapper || shellWrapperPositionalArgv;
-  const inferred =
-    shellCommand !== null && !mustBindDisplayToFullArgv
-      ? shellCommand.trim()
-      : formatExecCommand(params.argv);
+  const formattedArgv = formatExecCommand(params.argv);
+  // Legacy clients still send the extracted shell payload as rawCommand. That text is
+  // only a preview: approval prompts must be able to show the exact argv, including
+  // basename-spoofed wrappers such as `./env sh -c "jq --version"`.
+  const legacyShellText =
+    shellCommand !== null && !mustBindDisplayToFullArgv ? shellCommand.trim() : null;
+  const previewText = legacyShellText;
+  const cmdText = raw ?? legacyShellText ?? formattedArgv;
 
-  if (raw && raw !== inferred) {
-    return {
-      ok: false,
-      message: "INVALID_REQUEST: rawCommand does not match command",
-      details: {
-        code: "RAW_COMMAND_MISMATCH",
-        rawCommand: raw,
-        inferred,
-      },
-    };
+  if (raw) {
+    const matchesCanonicalArgv = raw === formattedArgv;
+    const matchesLegacyShellText = legacyShellText !== null && raw === legacyShellText;
+    if (!matchesCanonicalArgv && !matchesLegacyShellText) {
+      return {
+        ok: false,
+        message: "INVALID_REQUEST: rawCommand does not match command",
+        details: {
+          code: "RAW_COMMAND_MISMATCH",
+          rawCommand: raw,
+          inferred: legacyShellText ?? formattedArgv,
+          formattedArgv,
+        },
+      };
+    }
   }
 
   return {
     ok: true,
-    // Only treat this as a shell command when argv is a recognized shell wrapper.
-    // For direct argv execution and shell wrappers with env prelude modifiers,
-    // rawCommand is purely display/approval text and must match the formatted argv.
-    shellCommand:
-      shellCommand !== null
-        ? envManipulationBeforeShellWrapper
-          ? shellCommand
-          : (raw ?? shellCommand)
-        : null,
-    cmdText: raw ?? inferred,
+    // Keep the extracted shell payload for allowlist analysis. Do not replace it
+    // with approval text, which may be the full argv.
+    shellCommand: shellCommand !== null ? shellCommand : null,
+    cmdText,
+    previewText,
   };
 }
 
@@ -167,6 +175,7 @@ export function resolveSystemRunCommand(params: {
       rawCommand: null,
       shellCommand: null,
       cmdText: "",
+      previewText: null,
     };
   }
 
@@ -189,5 +198,6 @@ export function resolveSystemRunCommand(params: {
     rawCommand: raw,
     shellCommand: validation.shellCommand,
     cmdText: validation.cmdText,
+    previewText: validation.previewText,
   };
 }

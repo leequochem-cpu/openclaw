@@ -45,6 +45,15 @@
       }
     },
     {
+      "name": "env wrapper accepts canonical full argv raw command",
+      "command": ["/usr/bin/env", "bash", "-lc", "echo hi"],
+      "rawCommand": "/usr/bin/env bash -lc \"echo hi\"",
+      "expected": {
+        "valid": true,
+        "displayCommand": "/usr/bin/env bash -lc \"echo hi\""
+      }
+    },
+    {
       "name": "env wrapper shell payload accepted when prelude has no env modifiers",
       "command": ["/usr/bin/env", "bash", "-lc", "echo hi"],
       "rawCommand": "echo hi",

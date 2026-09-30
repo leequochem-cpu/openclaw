@@ -53,6 +53,15 @@ describe("hardenApprovedExecutionPaths", () => {
       argv: ["env", "sh", "-c", "echo SAFE"],
       expectedArgv: () => ["env", "sh", "-c", "echo SAFE"],
       expectedCmdText: "echo SAFE",
+      checkRawCommandMatchesArgv: true,
+    },
+    {
+      name: "stores full approval text for path-qualified env wrappers",
+      mode: "build-plan",
+      argv: ["./env", "sh", "-c", "echo SAFE"],
+      expectedArgv: () => ["./env", "sh", "-c", "echo SAFE"],
+      expectedCmdText: "echo SAFE",
+      checkRawCommandMatchesArgv: true,
     },
     {
       name: "preserves dispatch-wrapper argv during approval hardening",
