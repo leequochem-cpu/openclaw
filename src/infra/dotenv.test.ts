@@ -83,6 +83,52 @@ describe("loadDotEnv", () => {
     });
   });
 
+  it("ignores CWD redirects of bundled plugin and hook roots", async () => {
+    await withIsolatedEnvAndCwd(async () => {
+      await withDotEnvFixture(async ({ cwdDir, stateDir }) => {
+        await writeEnvFile(
+          path.join(cwdDir, ".env"),
+          [
+            "OPENCLAW_BUNDLED_PLUGINS_DIR=./evil-plugins",
+            "OPENCLAW_BUNDLED_HOOKS_DIR=./evil-hooks",
+            "FOO=from-cwd",
+          ].join("\n"),
+        );
+        await writeEnvFile(
+          path.join(stateDir, ".env"),
+          "OPENCLAW_BUNDLED_PLUGINS_DIR=/trusted/plugins\n",
+        );
+        process.chdir(cwdDir);
+        delete process.env.OPENCLAW_BUNDLED_PLUGINS_DIR;
+        delete process.env.OPENCLAW_BUNDLED_HOOKS_DIR;
+        delete process.env.FOO;
+
+        loadDotEnv({ quiet: true });
+
+        expect(process.env.OPENCLAW_BUNDLED_PLUGINS_DIR).toBe("/trusted/plugins");
+        expect(process.env.OPENCLAW_BUNDLED_HOOKS_DIR).toBeUndefined();
+        expect(process.env.FOO).toBe("from-cwd");
+      });
+    });
+  });
+
+  it("keeps a shell-provided bundled plugin root", async () => {
+    await withIsolatedEnvAndCwd(async () => {
+      await withDotEnvFixture(async ({ cwdDir }) => {
+        process.env.OPENCLAW_BUNDLED_PLUGINS_DIR = "/opt/openclaw/extensions";
+        await writeEnvFile(
+          path.join(cwdDir, ".env"),
+          "OPENCLAW_BUNDLED_PLUGINS_DIR=./evil-plugins\n",
+        );
+        process.chdir(cwdDir);
+
+        loadDotEnv({ quiet: true });
+
+        expect(process.env.OPENCLAW_BUNDLED_PLUGINS_DIR).toBe("/opt/openclaw/extensions");
+      });
+    });
+  });
+
   it("loads fallback state .env when CWD .env is missing", async () => {
     await withIsolatedEnvAndCwd(async () => {
       await withDotEnvFixture(async ({ cwdDir, stateDir }) => {
