@@ -104,7 +104,6 @@ type HandshakeBrowserSecurityContext = {
 
 function resolveHandshakeBrowserSecurityContext(params: {
   requestOrigin?: string;
-  hasProxyHeaders: boolean;
   clientIp: string | undefined;
   rateLimiter?: AuthRateLimiter;
   browserRateLimiter?: AuthRateLimiter;
@@ -114,7 +113,10 @@ function resolveHandshakeBrowserSecurityContext(params: {
   );
   return {
     hasBrowserOriginHeader,
-    enforceOriginCheckForAnyClient: hasBrowserOriginHeader && !params.hasProxyHeaders,
+    // Proxy headers must not skip this check. In trusted-proxy mode the proxy
+    // vouches for operator identity, so a browser page from an untrusted origin
+    // could otherwise inherit operator.admin through sharedAuthOk.
+    enforceOriginCheckForAnyClient: hasBrowserOriginHeader,
     rateLimitClientIp:
       hasBrowserOriginHeader && isLoopbackAddress(params.clientIp)
         ? BROWSER_ORIGIN_LOOPBACK_RATE_LIMIT_IP
@@ -348,7 +350,6 @@ export function attachGatewayWsMessageHandler(params: {
   const unauthorizedFloodGuard = new UnauthorizedFloodGuard();
   const browserSecurity = resolveHandshakeBrowserSecurityContext({
     requestOrigin,
-    hasProxyHeaders,
     clientIp,
     rateLimiter,
     browserRateLimiter,
