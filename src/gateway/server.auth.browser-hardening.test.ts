@@ -11,6 +11,7 @@ import {
 import { GATEWAY_CLIENT_MODES, GATEWAY_CLIENT_NAMES } from "../utils/message-channel.js";
 import { buildDeviceAuthPayload } from "./device-auth.js";
 import {
+  connectOk,
   connectReq,
   installGatewayTestHooks,
   readConnectChallengeNonce,
@@ -28,7 +29,18 @@ const TEST_OPERATOR_CLIENT = {
   mode: GATEWAY_CLIENT_MODES.TEST,
 };
 
+const ALLOWED_BROWSER_ORIGIN = "https://control.example.com";
+
 const originForPort = (port: number) => `http://127.0.0.1:${port}`;
+
+async function writeTrustedProxiesConfig() {
+  const { writeConfigFile } = await import("../config/config.js");
+  await writeConfigFile({
+    gateway: {
+      trustedProxies: ["127.0.0.1", "::1"],
+    },
+  });
+}
 
 const openWs = async (port: number, headers?: Record<string, string>) => {
   const ws = new WebSocket(`ws://127.0.0.1:${port}`, headers ? { headers } : undefined);
@@ -73,6 +85,71 @@ async function createSignedDevice(params: {
 }
 
 describe("gateway auth browser hardening", () => {
+  test("rejects trusted-proxy browser connects from origins outside the allowlist", async () => {
+    await writeTrustedProxiesConfig();
+    testState.gatewayAuth = {
+      mode: "trusted-proxy",
+      trustedProxy: {
+        userHeader: "x-forwarded-user",
+        requiredHeaders: ["x-forwarded-proto"],
+      },
+    };
+    testState.gatewayControlUi = {
+      allowedOrigins: [ALLOWED_BROWSER_ORIGIN],
+    };
+
+    await withGatewayServer(async ({ port }) => {
+      const ws = await openWs(port, {
+        origin: "https://evil.example",
+        "x-forwarded-for": "203.0.113.50",
+        "x-forwarded-proto": "https",
+        "x-forwarded-user": "operator@example.com",
+      });
+      try {
+        const res = await connectReq(ws, {
+          client: TEST_OPERATOR_CLIENT,
+          device: null,
+        });
+        expect(res.ok).toBe(false);
+        expect(res.error?.message ?? "").toContain("origin not allowed");
+      } finally {
+        ws.close();
+      }
+    });
+  });
+
+  test("accepts trusted-proxy browser connects from allowed origins", async () => {
+    await writeTrustedProxiesConfig();
+    testState.gatewayAuth = {
+      mode: "trusted-proxy",
+      trustedProxy: {
+        userHeader: "x-forwarded-user",
+        requiredHeaders: ["x-forwarded-proto"],
+      },
+    };
+    testState.gatewayControlUi = {
+      allowedOrigins: [ALLOWED_BROWSER_ORIGIN],
+    };
+
+    await withGatewayServer(async ({ port }) => {
+      const ws = await openWs(port, {
+        origin: ALLOWED_BROWSER_ORIGIN,
+        "x-forwarded-for": "203.0.113.50",
+        "x-forwarded-proto": "https",
+        "x-forwarded-user": "operator@example.com",
+      });
+      try {
+        const payload = await connectOk(ws, {
+          client: TEST_OPERATOR_CLIENT,
+          device: null,
+        });
+        expect(payload.type).toBe("hello-ok");
+      } finally {
+        ws.close();
+      }
+    });
+  });
+
   test("rejects non-local browser origins for non-control-ui clients", async () => {
     testState.gatewayAuth = { mode: "token", token: "secret" };
     await withGatewayServer(async ({ port }) => {
