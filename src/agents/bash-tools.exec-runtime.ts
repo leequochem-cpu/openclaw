@@ -1,6 +1,7 @@
 import path from "node:path";
 import type { AgentToolResult } from "@mariozechner/pi-agent-core";
 import { Type } from "@sinclair/typebox";
+import { sanitizeInboundSystemTags } from "../auto-reply/reply/inbound-text.js";
 import { type ExecHost } from "../infra/exec-approvals.js";
 import { requestHeartbeatNow } from "../infra/heartbeat-wake.js";
 import { isDangerousHostEnvVarName } from "../infra/host-env-security.js";
@@ -199,6 +200,10 @@ export function applyShellPath(env: Record<string, string>, shellPath?: string |
   }
 }
 
+function sanitizeExecSystemEventText(text: string): string {
+  return sanitizeInboundSystemTags(text);
+}
+
 function maybeNotifyOnExit(session: ProcessSession, status: "completed" | "failed") {
   if (!session.backgrounded || !session.notifyOnExit || session.exitNotified) {
     return;
@@ -220,7 +225,7 @@ function maybeNotifyOnExit(session: ProcessSession, status: "completed" | "faile
   const summary = output
     ? `Exec ${status} (${session.id.slice(0, 8)}, ${exitLabel}) :: ${output}`
     : `Exec ${status} (${session.id.slice(0, 8)}, ${exitLabel})`;
-  enqueueSystemEvent(summary, { sessionKey });
+  enqueueSystemEvent(sanitizeExecSystemEventText(summary), { sessionKey, trusted: false });
   requestHeartbeatNow(
     scopedHeartbeatWakeOptions(sessionKey, { reason: `exec:${session.id}:exit` }),
   );
@@ -248,7 +253,11 @@ export function emitExecSystemEvent(
   if (!sessionKey) {
     return;
   }
-  enqueueSystemEvent(text, { sessionKey, contextKey: opts.contextKey });
+  enqueueSystemEvent(sanitizeExecSystemEventText(text), {
+    sessionKey,
+    contextKey: opts.contextKey,
+    trusted: false,
+  });
   requestHeartbeatNow(scopedHeartbeatWakeOptions(sessionKey, { reason: "exec-event" }));
 }
 
