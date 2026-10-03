@@ -2,7 +2,13 @@
 // prefixed to the next prompt. We intentionally avoid persistence to keep
 // events ephemeral. Events are session-scoped and require an explicit key.
 
-export type SystemEvent = { text: string; ts: number; contextKey?: string | null };
+export type SystemEvent = {
+  text: string;
+  ts: number;
+  contextKey?: string | null;
+  /** False when the text comes from untrusted node or exec output. */
+  trusted?: boolean;
+};
 
 const MAX_EVENTS = 20;
 
@@ -17,6 +23,8 @@ const queues = new Map<string, SessionQueue>();
 type SystemEventOptions = {
   sessionKey: string;
   contextKey?: string | null;
+  /** Defaults to true. Set false for node notifications and exec output. */
+  trusted?: boolean;
 };
 
 function requireSessionKey(key?: string | null): string {
@@ -75,6 +83,8 @@ export function enqueueSystemEvent(text: string, options: SystemEventOptions) {
     text: cleaned,
     ts: Date.now(),
     contextKey: normalizedContextKey,
+    // Unset stays trusted so cron, restarts, and model switches keep System:.
+    trusted: options.trusted !== false,
   });
   if (entry.queue.length > MAX_EVENTS) {
     entry.queue.shift();

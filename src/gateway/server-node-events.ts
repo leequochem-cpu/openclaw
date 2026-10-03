@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { sanitizeInboundSystemTags } from "../auto-reply/reply/inbound-text.js";
 import { normalizeChannelId } from "../channels/plugins/index.js";
 import { createOutboundSendDeps } from "../cli/outbound-send-deps.js";
 import { agentCommandFromIngress } from "../commands/agent.js";
@@ -465,15 +466,23 @@ export const handleNodeEvent = async (ctx: NodeEventContext, nodeId: string, evt
       if (change !== "posted" && change !== "removed") {
         return;
       }
-      const key = normalizeNonEmptyString(obj.key);
-      if (!key) {
+      const keyRaw = normalizeNonEmptyString(obj.key);
+      if (!keyRaw) {
         return;
       }
+      // Notification text is phone/app content. Strip spoofed system markers
+      // before it is queued, and keep the raw key only for dedupe.
+      const key = sanitizeInboundSystemTags(keyRaw);
       const sessionKeyRaw = normalizeNonEmptyString(obj.sessionKey) ?? `node-${nodeId}`;
       const { canonicalKey: sessionKey } = loadSessionEntry(sessionKeyRaw);
-      const packageName = normalizeNonEmptyString(obj.packageName);
-      const title = compactNotificationEventText(normalizeNonEmptyString(obj.title) ?? "");
-      const text = compactNotificationEventText(normalizeNonEmptyString(obj.text) ?? "");
+      const packageNameRaw = normalizeNonEmptyString(obj.packageName);
+      const packageName = packageNameRaw ? sanitizeInboundSystemTags(packageNameRaw) : null;
+      const title = compactNotificationEventText(
+        sanitizeInboundSystemTags(normalizeNonEmptyString(obj.title) ?? ""),
+      );
+      const text = compactNotificationEventText(
+        sanitizeInboundSystemTags(normalizeNonEmptyString(obj.text) ?? ""),
+      );
 
       let summary = `Notification ${change} (node=${nodeId} key=${key}`;
       if (packageName) {
@@ -489,7 +498,8 @@ export const handleNodeEvent = async (ctx: NodeEventContext, nodeId: string, evt
 
       const queued = enqueueSystemEvent(summary, {
         sessionKey,
-        contextKey: `notification:${key}`,
+        contextKey: `notification:${keyRaw}`,
+        trusted: false,
       });
       if (queued) {
         requestHeartbeatNow({ reason: "notifications-event", sessionKey });
@@ -540,14 +550,18 @@ export const handleNodeEvent = async (ctx: NodeEventContext, nodeId: string, evt
       }
 
       const runId = typeof obj.runId === "string" ? obj.runId.trim() : "";
-      const command = typeof obj.command === "string" ? obj.command.trim() : "";
+      const commandRaw = typeof obj.command === "string" ? obj.command.trim() : "";
+      const command = commandRaw ? sanitizeInboundSystemTags(commandRaw) : "";
       const exitCode =
         typeof obj.exitCode === "number" && Number.isFinite(obj.exitCode)
           ? obj.exitCode
           : undefined;
       const timedOut = obj.timedOut === true;
-      const output = typeof obj.output === "string" ? obj.output.trim() : "";
-      const reason = typeof obj.reason === "string" ? obj.reason.trim() : "";
+      const output = sanitizeInboundSystemTags(
+        typeof obj.output === "string" ? obj.output.trim() : "",
+      );
+      const reasonRaw = typeof obj.reason === "string" ? obj.reason.trim() : "";
+      const reason = reasonRaw ? sanitizeInboundSystemTags(reasonRaw) : "";
 
       let text = "";
       if (evt.event === "exec.started") {
@@ -573,7 +587,11 @@ export const handleNodeEvent = async (ctx: NodeEventContext, nodeId: string, evt
         }
       }
 
-      enqueueSystemEvent(text, { sessionKey, contextKey: runId ? `exec:${runId}` : "exec" });
+      enqueueSystemEvent(text, {
+        sessionKey,
+        contextKey: runId ? `exec:${runId}` : "exec",
+        trusted: false,
+      });
       // Scope wakes only for canonical agent sessions. Synthetic node-* fallback
       // keys should keep legacy unscoped behavior so enabled non-main heartbeat
       // agents still run when no explicit agent session is provided.
