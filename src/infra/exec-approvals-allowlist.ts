@@ -92,7 +92,7 @@ export function isSafeBinUsage(params: {
   if (!profile) {
     return false;
   }
-  return validateSafeBinArgv(argv, profile);
+  return validateSafeBinArgv(argv, profile, { binName: execName });
 }
 
 function isPathScopedExecutableToken(token: string): boolean {

@@ -175,6 +175,24 @@ describe("exec approvals safe bins", () => {
       expected: true,
     },
     {
+      name: "blocks jq env builtin even when jq is explicitly opted in",
+      argv: ["jq", "env"],
+      resolvedPath: "/usr/bin/jq",
+      expected: false,
+    },
+    {
+      name: "blocks jq $ENV builtin variable even when jq is explicitly opted in",
+      argv: ["jq", "$ENV"],
+      resolvedPath: "/usr/bin/jq",
+      expected: false,
+    },
+    {
+      name: "blocks jq $ENV property access even when jq is explicitly opted in",
+      argv: ["jq", "($ENV).OPENAI_API_KEY"],
+      resolvedPath: "/usr/bin/jq",
+      expected: false,
+    },
+    {
       name: "blocks safe bins with file args",
       argv: ["jq", ".foo", "secret.json"],
       resolvedPath: "/usr/bin/jq",
@@ -471,6 +489,36 @@ describe("exec approvals safe bins", () => {
     expect(result.allowlistSatisfied).toBe(false);
     expect(result.segmentSatisfiedBy).toEqual([null]);
     expect(result.segments[0]?.resolution?.resolvedPath).toBe(fakeHead);
+  });
+
+  it("does not auto-allow jq env filters in shell allowlist mode", () => {
+    if (process.platform === "win32") {
+      return;
+    }
+    const envFilter = evaluateShellAllowlist({
+      command: "jq 'env'",
+      allowlist: [],
+      safeBins: normalizeSafeBins(["jq"]),
+      cwd: "/tmp",
+    });
+    const envVariable = evaluateShellAllowlist({
+      command: "jq '$ENV'",
+      allowlist: [],
+      safeBins: normalizeSafeBins(["jq"]),
+      cwd: "/tmp",
+    });
+    const fieldFilter = evaluateShellAllowlist({
+      command: "jq '.foo'",
+      allowlist: [],
+      safeBins: normalizeSafeBins(["jq"]),
+      cwd: "/tmp",
+    });
+    expect(envFilter.analysisOk).toBe(true);
+    expect(envFilter.allowlistSatisfied).toBe(false);
+    expect(envVariable.analysisOk).toBe(true);
+    expect(envVariable.allowlistSatisfied).toBe(false);
+    expect(fieldFilter.analysisOk).toBe(true);
+    expect(fieldFilter.allowlistSatisfied).toBe(true);
   });
 
   it("fails closed for semantic env wrappers in allowlist mode", () => {

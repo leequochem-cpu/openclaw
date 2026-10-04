@@ -69,6 +69,25 @@ describe("exec safe bin policy sort", () => {
   });
 });
 
+describe("exec safe bin policy jq", () => {
+  const jqProfile = SAFE_BIN_PROFILES.jq;
+
+  it("allows normal jq field filters", () => {
+    expect(validateSafeBinArgv([".foo"], jqProfile, { binName: "jq" })).toBe(true);
+    expect(validateSafeBinArgv([".env"], jqProfile, { binName: "jq" })).toBe(true);
+  });
+
+  it("blocks jq env builtin filters in safe-bin mode", () => {
+    expect(validateSafeBinArgv(["env"], jqProfile, { binName: "jq" })).toBe(false);
+    expect(validateSafeBinArgv(["env.FOO"], jqProfile, { binName: "jq" })).toBe(false);
+    expect(validateSafeBinArgv([".foo | env"], jqProfile, { binName: "jq" })).toBe(false);
+    expect(validateSafeBinArgv(["$ENV"], jqProfile, { binName: "jq" })).toBe(false);
+    expect(validateSafeBinArgv(["($ENV).OPENAI_API_KEY"], jqProfile, { binName: "jq" })).toBe(
+      false,
+    );
+  });
+});
+
 describe("exec safe bin policy wc", () => {
   const wcProfile = SAFE_BIN_PROFILES.wc;
 

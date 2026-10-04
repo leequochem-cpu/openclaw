@@ -130,7 +130,28 @@ function validatePositionalCount(positional: string[], profile: SafeBinProfile):
   return typeof profile.maxPositional !== "number" || positional.length <= profile.maxPositional;
 }
 
-export function validateSafeBinArgv(args: string[], profile: SafeBinProfile): boolean {
+// jq's `env` builtin and `$ENV` both dump the process environment. Safe bins are
+// auto-allowed in allowlist mode, so a stdin filter must not become an env read.
+const JQ_ENV_FILTER_PATTERN = /(^|[^.$A-Za-z0-9_])env([^A-Za-z0-9_]|$)/;
+const JQ_ENV_VARIABLE_PATTERN = /\$ENV\b/;
+
+function allowsSafeBinPositionalSemantics(params: {
+  binName?: string;
+  positional: readonly string[];
+}): boolean {
+  if (params.binName?.trim().toLowerCase() !== "jq") {
+    return true;
+  }
+  return !params.positional.some(
+    (token) => JQ_ENV_FILTER_PATTERN.test(token) || JQ_ENV_VARIABLE_PATTERN.test(token),
+  );
+}
+
+export function validateSafeBinArgv(
+  args: string[],
+  profile: SafeBinProfile,
+  options?: { binName?: string },
+): boolean {
   const allowedValueFlags = profile.allowedValueFlags ?? NO_FLAGS;
   const deniedFlags = profile.deniedFlags ?? NO_FLAGS;
   const knownLongFlags =
@@ -202,5 +223,11 @@ export function validateSafeBinArgv(args: string[], profile: SafeBinProfile): bo
     i = nextIndex;
   }
 
-  return validatePositionalCount(positional, profile);
+  if (!validatePositionalCount(positional, profile)) {
+    return false;
+  }
+  return allowsSafeBinPositionalSemantics({
+    binName: options?.binName,
+    positional,
+  });
 }
