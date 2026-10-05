@@ -180,6 +180,31 @@ describe("exec host env validation", () => {
     ).rejects.toThrow(/Security Violation: Environment variable 'LD_DEBUG' is forbidden/);
   });
 
+  it("blocks git plumbing and override env that can retarget allowlisted git", async () => {
+    const tool = createExecTool({ host: "gateway", security: "full", ask: "off" });
+
+    await expect(
+      tool.execute("call1", {
+        command: "git status",
+        env: { GIT_DIR: "/tmp/evil.git" },
+      }),
+    ).rejects.toThrow(/Security Violation: Environment variable 'GIT_DIR' is forbidden/);
+
+    await expect(
+      tool.execute("call2", {
+        command: "git status",
+        env: { GIT_CONFIG_COUNT: "1" },
+      }),
+    ).rejects.toThrow(/Security Violation: Environment variable 'GIT_CONFIG_COUNT' is forbidden/);
+
+    await expect(
+      tool.execute("call3", {
+        command: "git ls-remote ssh://example.invalid/repo.git",
+        env: { GIT_SSH_COMMAND: "touch /tmp/pwned" },
+      }),
+    ).rejects.toThrow(/Security Violation: Environment variable 'GIT_SSH_COMMAND' is forbidden/);
+  });
+
   it("strips dangerous inherited env vars from host execution", async () => {
     if (isWin) {
       return;

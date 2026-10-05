@@ -17,6 +17,9 @@ describe("isDangerousHostEnvVarName", () => {
     expect(isDangerousHostEnvVarName("bash_env")).toBe(true);
     expect(isDangerousHostEnvVarName("SHELL")).toBe(true);
     expect(isDangerousHostEnvVarName("GIT_EXTERNAL_DIFF")).toBe(true);
+    expect(isDangerousHostEnvVarName("GIT_DIR")).toBe(true);
+    expect(isDangerousHostEnvVarName("git_exec_path")).toBe(true);
+    expect(isDangerousHostEnvVarName("GIT_ALTERNATE_OBJECT_DIRECTORIES")).toBe(true);
     expect(isDangerousHostEnvVarName("SHELLOPTS")).toBe(true);
     expect(isDangerousHostEnvVarName("ps4")).toBe(true);
     expect(isDangerousHostEnvVarName("DYLD_INSERT_LIBRARIES")).toBe(true);
@@ -34,6 +37,8 @@ describe("sanitizeHostExecEnv", () => {
         PATH: "/usr/bin:/bin",
         BASH_ENV: "/tmp/pwn.sh",
         GIT_EXTERNAL_DIFF: "/tmp/pwn.sh",
+        GIT_DIR: "/tmp/evil.git",
+        GIT_EXEC_PATH: "/tmp/evil-git-exec",
         LD_PRELOAD: "/tmp/pwn.so",
         OK: "1",
       },
