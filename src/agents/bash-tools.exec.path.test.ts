@@ -180,6 +180,37 @@ describe("exec host env validation", () => {
     ).rejects.toThrow(/Security Violation: Environment variable 'LD_DEBUG' is forbidden/);
   });
 
+  it("blocks build-tool env overrides that execute helpers", async () => {
+    const tool = createExecTool({ host: "gateway", security: "full", ask: "off" });
+
+    await expect(
+      tool.execute("call-makeflags", {
+        command: "make -f /dev/null -q",
+        env: { MAKEFLAGS: "--eval=$(shell touch /tmp/pwned)" },
+      }),
+    ).rejects.toThrow(/Security Violation: Environment variable 'MAKEFLAGS' is forbidden/);
+    await expect(
+      tool.execute("call-rustc-wrapper", {
+        command: "cargo build",
+        env: { RUSTC_WRAPPER: "/tmp/wrapper.sh" },
+      }),
+    ).rejects.toThrow(/Security Violation: Environment variable 'RUSTC_WRAPPER' is forbidden/);
+    await expect(
+      tool.execute("call-cargo-build-wrapper", {
+        command: "cargo build",
+        env: { CARGO_BUILD_RUSTC_WRAPPER: "/tmp/wrapper.sh" },
+      }),
+    ).rejects.toThrow(
+      /Security Violation: Environment variable 'CARGO_BUILD_RUSTC_WRAPPER' is forbidden/,
+    );
+    await expect(
+      tool.execute("call-hgrc", {
+        command: "hg status",
+        env: { HGRCPATH: "/tmp/evil.hgrc" },
+      }),
+    ).rejects.toThrow(/Security Violation: Environment variable 'HGRCPATH' is forbidden/);
+  });
+
   it("strips dangerous inherited env vars from host execution", async () => {
     if (isWin) {
       return;
