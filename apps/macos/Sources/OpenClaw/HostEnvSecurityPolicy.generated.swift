@@ -22,7 +22,11 @@ enum HostEnvSecurityPolicy {
         "PS4",
         "GCONV_PATH",
         "IFS",
-        "SSLKEYLOGFILE"
+        "SSLKEYLOGFILE",
+        "MAKEFLAGS",
+        "HGRCPATH",
+        "RUSTC_WRAPPER",
+        "CARGO_BUILD_RUSTC_WRAPPER"
     ]
 
     static let blockedOverrideKeys: Set<String> = [

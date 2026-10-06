@@ -22,6 +22,11 @@ describe("isDangerousHostEnvVarName", () => {
     expect(isDangerousHostEnvVarName("DYLD_INSERT_LIBRARIES")).toBe(true);
     expect(isDangerousHostEnvVarName("ld_preload")).toBe(true);
     expect(isDangerousHostEnvVarName("BASH_FUNC_echo%%")).toBe(true);
+    expect(isDangerousHostEnvVarName("MAKEFLAGS")).toBe(true);
+    expect(isDangerousHostEnvVarName("makeflags")).toBe(true);
+    expect(isDangerousHostEnvVarName("HGRCPATH")).toBe(true);
+    expect(isDangerousHostEnvVarName("RUSTC_WRAPPER")).toBe(true);
+    expect(isDangerousHostEnvVarName("CARGO_BUILD_RUSTC_WRAPPER")).toBe(true);
     expect(isDangerousHostEnvVarName("PATH")).toBe(false);
     expect(isDangerousHostEnvVarName("FOO")).toBe(false);
   });
@@ -111,6 +116,28 @@ describe("sanitizeHostExecEnv", () => {
     expect(env.GOOD_KEY).toBe("ok");
     expect(env[" BAD KEY"]).toBeUndefined();
     expect(env["NOT-PORTABLE"]).toBeUndefined();
+  });
+
+  it("drops build-tool exec overrides that can launch helpers", () => {
+    const env = sanitizeHostExecEnv({
+      baseEnv: {
+        PATH: "/usr/bin:/bin",
+        MAKEFLAGS: "--eval=$(shell touch /tmp/pwned)",
+      },
+      overrides: {
+        HGRCPATH: "/tmp/evil.hgrc",
+        RUSTC_WRAPPER: "/tmp/wrapper.sh",
+        CARGO_BUILD_RUSTC_WRAPPER: "/tmp/wrapper.sh",
+        SAFE: "ok",
+      },
+    });
+
+    expect(env.PATH).toBe("/usr/bin:/bin");
+    expect(env.SAFE).toBe("ok");
+    expect(env.MAKEFLAGS).toBeUndefined();
+    expect(env.HGRCPATH).toBeUndefined();
+    expect(env.RUSTC_WRAPPER).toBeUndefined();
+    expect(env.CARGO_BUILD_RUSTC_WRAPPER).toBeUndefined();
   });
 });
 
