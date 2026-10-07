@@ -22,7 +22,14 @@ enum HostEnvSecurityPolicy {
         "PS4",
         "GCONV_PATH",
         "IFS",
-        "SSLKEYLOGFILE"
+        "SSLKEYLOGFILE",
+        "EXINIT",
+        "VIMINIT",
+        "LUA_INIT",
+        "LUA_INIT_5_1",
+        "LUA_INIT_5_2",
+        "LUA_INIT_5_3",
+        "LUA_INIT_5_4"
     ]
 
     static let blockedOverrideKeys: Set<String> = [

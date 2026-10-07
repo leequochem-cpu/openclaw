@@ -180,6 +180,31 @@ describe("exec host env validation", () => {
     ).rejects.toThrow(/Security Violation: Environment variable 'LD_DEBUG' is forbidden/);
   });
 
+  it("blocks editor and lua startup env that runs during allowlisted interpreters", async () => {
+    const tool = createExecTool({ host: "gateway", security: "full", ask: "off" });
+
+    await expect(
+      tool.execute("call-viminit", {
+        command: "vim README.md",
+        env: { VIMINIT: 'call system("touch /tmp/pwned")|qa' },
+      }),
+    ).rejects.toThrow(/Security Violation: Environment variable 'VIMINIT' is forbidden/);
+
+    await expect(
+      tool.execute("call-exinit", {
+        command: "vim README.md",
+        env: { EXINIT: 'call system("touch /tmp/pwned")|qa' },
+      }),
+    ).rejects.toThrow(/Security Violation: Environment variable 'EXINIT' is forbidden/);
+
+    await expect(
+      tool.execute("call-lua-init", {
+        command: "lua -v",
+        env: { LUA_INIT: 'os.execute("touch /tmp/pwned")' },
+      }),
+    ).rejects.toThrow(/Security Violation: Environment variable 'LUA_INIT' is forbidden/);
+  });
+
   it("strips dangerous inherited env vars from host execution", async () => {
     if (isWin) {
       return;
