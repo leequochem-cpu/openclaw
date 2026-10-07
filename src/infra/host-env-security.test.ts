@@ -17,6 +17,10 @@ describe("isDangerousHostEnvVarName", () => {
     expect(isDangerousHostEnvVarName("bash_env")).toBe(true);
     expect(isDangerousHostEnvVarName("SHELL")).toBe(true);
     expect(isDangerousHostEnvVarName("GIT_EXTERNAL_DIFF")).toBe(true);
+    expect(isDangerousHostEnvVarName("VIMINIT")).toBe(true);
+    expect(isDangerousHostEnvVarName("exinit")).toBe(true);
+    expect(isDangerousHostEnvVarName("LUA_INIT")).toBe(true);
+    expect(isDangerousHostEnvVarName("LUA_INIT_5_4")).toBe(true);
     expect(isDangerousHostEnvVarName("SHELLOPTS")).toBe(true);
     expect(isDangerousHostEnvVarName("ps4")).toBe(true);
     expect(isDangerousHostEnvVarName("DYLD_INSERT_LIBRARIES")).toBe(true);
