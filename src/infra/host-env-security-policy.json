@@ -16,7 +16,13 @@
     "PS4",
     "GCONV_PATH",
     "IFS",
-    "SSLKEYLOGFILE"
+    "SSLKEYLOGFILE",
+    "CARGO_BUILD_RUSTC",
+    "CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER",
+    "CARGO_BUILD_RUSTDOC",
+    "RUSTC",
+    "RUSTC_WORKSPACE_WRAPPER",
+    "RUSTDOC"
   ],
   "blockedOverrideKeys": [
     "HOME",
@@ -43,7 +49,8 @@
     "OPENSSL_ENGINES",
     "PYTHONSTARTUP",
     "WGETRC",
-    "CURL_HOME"
+    "CURL_HOME",
+    "RUSTUP_TOOLCHAIN"
   ],
   "blockedOverridePrefixes": ["GIT_CONFIG_", "NPM_CONFIG_"],
   "blockedPrefixes": ["DYLD_", "LD_", "BASH_FUNC_"]
