@@ -22,7 +22,13 @@ enum HostEnvSecurityPolicy {
         "PS4",
         "GCONV_PATH",
         "IFS",
-        "SSLKEYLOGFILE"
+        "SSLKEYLOGFILE",
+        "CARGO_BUILD_RUSTC",
+        "CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER",
+        "CARGO_BUILD_RUSTDOC",
+        "RUSTC",
+        "RUSTC_WORKSPACE_WRAPPER",
+        "RUSTDOC"
     ]
 
     static let blockedOverrideKeys: Set<String> = [
@@ -50,7 +56,8 @@ enum HostEnvSecurityPolicy {
         "OPENSSL_ENGINES",
         "PYTHONSTARTUP",
         "WGETRC",
-        "CURL_HOME"
+        "CURL_HOME",
+        "RUSTUP_TOOLCHAIN"
     ]
 
     static let blockedOverridePrefixes: [String] = [

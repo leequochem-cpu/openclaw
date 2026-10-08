@@ -24,6 +24,12 @@ describe("isDangerousHostEnvVarName", () => {
     expect(isDangerousHostEnvVarName("BASH_FUNC_echo%%")).toBe(true);
     expect(isDangerousHostEnvVarName("PATH")).toBe(false);
     expect(isDangerousHostEnvVarName("FOO")).toBe(false);
+    expect(isDangerousHostEnvVarName("RUSTC")).toBe(true);
+    expect(isDangerousHostEnvVarName("cargo_build_rustc")).toBe(true);
+    expect(isDangerousHostEnvVarName("RUSTC_WORKSPACE_WRAPPER")).toBe(true);
+    expect(isDangerousHostEnvVarName("CARGO_BUILD_RUSTDOC")).toBe(true);
+    expect(isDangerousHostEnvVarName("RUSTDOC")).toBe(true);
+    expect(isDangerousHostEnvVarName("RUSTUP_TOOLCHAIN")).toBe(false);
   });
 });
 
@@ -80,6 +86,36 @@ describe("sanitizeHostExecEnv", () => {
     expect(env.ZDOTDIR).toBe("/tmp/trusted-zdotdir");
   });
 
+  it("drops rust compiler overrides while preserving an inherited rustup toolchain", () => {
+    const env = sanitizeHostExecEnv({
+      baseEnv: {
+        PATH: "/usr/bin:/bin",
+        RUSTUP_TOOLCHAIN: "stable",
+        RUSTC: "/usr/bin/rustc",
+      },
+      overrides: {
+        RUSTC: "/tmp/evil-rustc",
+        CARGO_BUILD_RUSTC: "/tmp/evil-rustc",
+        CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER: "/tmp/evil-wrapper",
+        CARGO_BUILD_RUSTDOC: "/tmp/evil-rustdoc",
+        RUSTC_WORKSPACE_WRAPPER: "/tmp/evil-wrapper",
+        RUSTDOC: "/tmp/evil-rustdoc",
+        RUSTUP_TOOLCHAIN: "/tmp/evil-tc",
+        SAFE: "ok",
+      },
+    });
+
+    expect(env.PATH).toBe("/usr/bin:/bin");
+    expect(env.RUSTC).toBeUndefined();
+    expect(env.CARGO_BUILD_RUSTC).toBeUndefined();
+    expect(env.CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER).toBeUndefined();
+    expect(env.CARGO_BUILD_RUSTDOC).toBeUndefined();
+    expect(env.RUSTC_WORKSPACE_WRAPPER).toBeUndefined();
+    expect(env.RUSTDOC).toBeUndefined();
+    expect(env.RUSTUP_TOOLCHAIN).toBe("stable");
+    expect(env.SAFE).toBe("ok");
+  });
+
   it("drops dangerous inherited shell trace keys", () => {
     const env = sanitizeHostExecEnv({
       baseEnv: {
@@ -124,6 +160,9 @@ describe("isDangerousHostEnvOverrideVarName", () => {
     expect(isDangerousHostEnvOverrideVarName("git_config_global")).toBe(true);
     expect(isDangerousHostEnvOverrideVarName("BASH_ENV")).toBe(false);
     expect(isDangerousHostEnvOverrideVarName("FOO")).toBe(false);
+    expect(isDangerousHostEnvOverrideVarName("RUSTUP_TOOLCHAIN")).toBe(true);
+    expect(isDangerousHostEnvOverrideVarName("rustup_toolchain")).toBe(true);
+    expect(isDangerousHostEnvOverrideVarName("RUSTC")).toBe(false);
   });
 });
 

@@ -180,6 +180,40 @@ describe("exec host env validation", () => {
     ).rejects.toThrow(/Security Violation: Environment variable 'LD_DEBUG' is forbidden/);
   });
 
+  it("blocks rust compiler and rustup toolchain overrides on host execution", async () => {
+    const tool = createExecTool({ host: "gateway", security: "full", ask: "off" });
+
+    await expect(
+      tool.execute("call-rustc", {
+        command: "rustc --version",
+        env: { RUSTC: "/tmp/evil-rustc" },
+      }),
+    ).rejects.toThrow(/Security Violation: Environment variable 'RUSTC' is forbidden/);
+
+    await expect(
+      tool.execute("call-cargo-rustc", {
+        command: "cargo build --offline",
+        env: { CARGO_BUILD_RUSTC: "/tmp/evil-rustc" },
+      }),
+    ).rejects.toThrow(/Security Violation: Environment variable 'CARGO_BUILD_RUSTC' is forbidden/);
+
+    await expect(
+      tool.execute("call-rustc-wrapper", {
+        command: "cargo build --offline",
+        env: { RUSTC_WORKSPACE_WRAPPER: "/tmp/evil-rustc" },
+      }),
+    ).rejects.toThrow(
+      /Security Violation: Environment variable 'RUSTC_WORKSPACE_WRAPPER' is forbidden/,
+    );
+
+    await expect(
+      tool.execute("call-rustup", {
+        command: "rustc --version",
+        env: { RUSTUP_TOOLCHAIN: "/tmp/evil-tc" },
+      }),
+    ).rejects.toThrow(/Security Violation: Environment variable 'RUSTUP_TOOLCHAIN' is forbidden/);
+  });
+
   it("strips dangerous inherited env vars from host execution", async () => {
     if (isWin) {
       return;

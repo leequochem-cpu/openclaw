@@ -3,7 +3,10 @@ import type { AgentToolResult } from "@mariozechner/pi-agent-core";
 import { Type } from "@sinclair/typebox";
 import { type ExecHost } from "../infra/exec-approvals.js";
 import { requestHeartbeatNow } from "../infra/heartbeat-wake.js";
-import { isDangerousHostEnvVarName } from "../infra/host-env-security.js";
+import {
+  isDangerousHostEnvOverrideVarName,
+  isDangerousHostEnvVarName,
+} from "../infra/host-env-security.js";
 import { findPathKey, mergePathPrepend } from "../infra/path-prepend.js";
 import { enqueueSystemEvent } from "../infra/system-events.js";
 import { scopedHeartbeatWakeOptions } from "../routing/session-key.js";
@@ -58,15 +61,16 @@ export function validateHostEnv(env: Record<string, string>): void {
   for (const key of Object.keys(env)) {
     const upperKey = key.toUpperCase();
 
-    // 1. Block known dangerous variables (Fail Closed)
-    if (isDangerousHostEnvVarName(upperKey)) {
+    // Block inherited-dangerous keys and request-only override keys. Gateway exec
+    // merges tool env directly, so override keys such as RUSTUP_TOOLCHAIN must be
+    // rejected here, not only in sanitizeHostExecEnv.
+    if (isDangerousHostEnvVarName(upperKey) || isDangerousHostEnvOverrideVarName(upperKey)) {
       throw new Error(
         `Security Violation: Environment variable '${key}' is forbidden during host execution.`,
       );
     }
 
-    // 2. Strictly block PATH modification on host
-    // Allowing custom PATH on the gateway/node can lead to binary hijacking.
+    // PATH is part of command resolution. Never allow request-scoped PATH overrides.
     if (upperKey === "PATH") {
       throw new Error(
         "Security Violation: Custom 'PATH' variable is forbidden during host execution.",
