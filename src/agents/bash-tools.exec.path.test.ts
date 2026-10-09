@@ -180,6 +180,31 @@ describe("exec host env validation", () => {
     ).rejects.toThrow(/Security Violation: Environment variable 'LD_DEBUG' is forbidden/);
   });
 
+  it("blocks JVM launcher options that can load a javaagent", async () => {
+    const tool = createExecTool({ host: "gateway", security: "full", ask: "off" });
+
+    await expect(
+      tool.execute("call-java-tool-options", {
+        command: "java -version",
+        env: { JAVA_TOOL_OPTIONS: "-javaagent:/tmp/evil.jar" },
+      }),
+    ).rejects.toThrow(/Security Violation: Environment variable 'JAVA_TOOL_OPTIONS' is forbidden/);
+
+    await expect(
+      tool.execute("call-jdk-java-options", {
+        command: "javac -version",
+        env: { JDK_JAVA_OPTIONS: "-javaagent:/tmp/evil.jar" },
+      }),
+    ).rejects.toThrow(/Security Violation: Environment variable 'JDK_JAVA_OPTIONS' is forbidden/);
+
+    await expect(
+      tool.execute("call-underscore-java-options", {
+        command: "java -version",
+        env: { _JAVA_OPTIONS: "-javaagent:/tmp/evil.jar" },
+      }),
+    ).rejects.toThrow(/Security Violation: Environment variable '_JAVA_OPTIONS' is forbidden/);
+  });
+
   it("strips dangerous inherited env vars from host execution", async () => {
     if (isWin) {
       return;
