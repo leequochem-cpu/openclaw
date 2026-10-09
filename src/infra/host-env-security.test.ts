@@ -24,6 +24,9 @@ describe("isDangerousHostEnvVarName", () => {
     expect(isDangerousHostEnvVarName("BASH_FUNC_echo%%")).toBe(true);
     expect(isDangerousHostEnvVarName("PATH")).toBe(false);
     expect(isDangerousHostEnvVarName("FOO")).toBe(false);
+    expect(isDangerousHostEnvVarName("JAVA_TOOL_OPTIONS")).toBe(true);
+    expect(isDangerousHostEnvVarName("jdk_java_options")).toBe(true);
+    expect(isDangerousHostEnvVarName("_JAVA_OPTIONS")).toBe(true);
   });
 });
 
@@ -78,6 +81,27 @@ describe("sanitizeHostExecEnv", () => {
     expect(env.SAFE).toBe("ok");
     expect(env.HOME).toBe("/tmp/trusted-home");
     expect(env.ZDOTDIR).toBe("/tmp/trusted-zdotdir");
+  });
+
+  it("drops JVM launcher agent overrides", () => {
+    const env = sanitizeHostExecEnv({
+      baseEnv: {
+        PATH: "/usr/bin:/bin",
+        JAVA_TOOL_OPTIONS: "-javaagent:/tmp/inherited.jar",
+      },
+      overrides: {
+        JAVA_TOOL_OPTIONS: "-javaagent:/tmp/evil.jar",
+        JDK_JAVA_OPTIONS: "-javaagent:/tmp/evil.jar",
+        _JAVA_OPTIONS: "-javaagent:/tmp/evil.jar",
+        SAFE: "ok",
+      },
+    });
+
+    expect(env.PATH).toBe("/usr/bin:/bin");
+    expect(env.JAVA_TOOL_OPTIONS).toBeUndefined();
+    expect(env.JDK_JAVA_OPTIONS).toBeUndefined();
+    expect(env._JAVA_OPTIONS).toBeUndefined();
+    expect(env.SAFE).toBe("ok");
   });
 
   it("drops dangerous inherited shell trace keys", () => {
