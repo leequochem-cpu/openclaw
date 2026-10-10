@@ -180,6 +180,24 @@ describe("exec host env validation", () => {
     ).rejects.toThrow(/Security Violation: Environment variable 'LD_DEBUG' is forbidden/);
   });
 
+  it("blocks Cargo home and Go toolchain overrides on host execution", async () => {
+    const tool = createExecTool({ host: "gateway", security: "full", ask: "off" });
+
+    await expect(
+      tool.execute("call-cargo-home", {
+        command: "cargo build --offline",
+        env: { CARGO_HOME: "/tmp/evil-cargo" },
+      }),
+    ).rejects.toThrow(/Security Violation: Environment variable 'CARGO_HOME' is forbidden/);
+
+    await expect(
+      tool.execute("call-goflags", {
+        command: "go build",
+        env: { GOFLAGS: "-toolexec=/tmp/toolexec.sh" },
+      }),
+    ).rejects.toThrow(/Security Violation: Environment variable 'GOFLAGS' is forbidden/);
+  });
+
   it("strips dangerous inherited env vars from host execution", async () => {
     if (isWin) {
       return;

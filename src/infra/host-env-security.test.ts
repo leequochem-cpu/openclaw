@@ -24,6 +24,10 @@ describe("isDangerousHostEnvVarName", () => {
     expect(isDangerousHostEnvVarName("BASH_FUNC_echo%%")).toBe(true);
     expect(isDangerousHostEnvVarName("PATH")).toBe(false);
     expect(isDangerousHostEnvVarName("FOO")).toBe(false);
+    expect(isDangerousHostEnvVarName("CARGO_HOME")).toBe(true);
+    expect(isDangerousHostEnvVarName("cargo_home")).toBe(true);
+    expect(isDangerousHostEnvVarName("GOFLAGS")).toBe(true);
+    expect(isDangerousHostEnvVarName("goflags")).toBe(true);
   });
 });
 
@@ -78,6 +82,26 @@ describe("sanitizeHostExecEnv", () => {
     expect(env.SAFE).toBe("ok");
     expect(env.HOME).toBe("/tmp/trusted-home");
     expect(env.ZDOTDIR).toBe("/tmp/trusted-zdotdir");
+  });
+
+  it("drops Cargo home and Go flag overrides that can launch a compiler wrapper", () => {
+    const env = sanitizeHostExecEnv({
+      baseEnv: {
+        PATH: "/usr/bin:/bin",
+        CARGO_HOME: "/usr/local/cargo",
+        GOFLAGS: "-mod=readonly",
+      },
+      overrides: {
+        CARGO_HOME: "/tmp/evil-cargo",
+        GOFLAGS: "-toolexec=/tmp/toolexec.sh",
+        SAFE: "ok",
+      },
+    });
+
+    expect(env.PATH).toBe("/usr/bin:/bin");
+    expect(env.CARGO_HOME).toBeUndefined();
+    expect(env.GOFLAGS).toBeUndefined();
+    expect(env.SAFE).toBe("ok");
   });
 
   it("drops dangerous inherited shell trace keys", () => {
