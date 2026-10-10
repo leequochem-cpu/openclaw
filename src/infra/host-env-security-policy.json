@@ -16,7 +16,9 @@
     "PS4",
     "GCONV_PATH",
     "IFS",
-    "SSLKEYLOGFILE"
+    "SSLKEYLOGFILE",
+    "CARGO_HOME",
+    "GOFLAGS"
   ],
   "blockedOverrideKeys": [
     "HOME",
