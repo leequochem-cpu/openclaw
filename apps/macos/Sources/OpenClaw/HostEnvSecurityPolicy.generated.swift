@@ -10,6 +10,8 @@ enum HostEnvSecurityPolicy {
         "NODE_PATH",
         "PYTHONHOME",
         "PYTHONPATH",
+        "PYTHONUSERBASE",
+        "CMAKE_TOOLCHAIN_FILE",
         "PERL5LIB",
         "PERL5OPT",
         "RUBYLIB",

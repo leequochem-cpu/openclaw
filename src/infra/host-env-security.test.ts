@@ -13,6 +13,10 @@ import {
 
 describe("isDangerousHostEnvVarName", () => {
   it("matches dangerous keys and prefixes case-insensitively", () => {
+    expect(isDangerousHostEnvVarName("PYTHONUSERBASE")).toBe(true);
+    expect(isDangerousHostEnvVarName("pythonuserbase")).toBe(true);
+    expect(isDangerousHostEnvVarName("CMAKE_TOOLCHAIN_FILE")).toBe(true);
+    expect(isDangerousHostEnvVarName("cmake_toolchain_file")).toBe(true);
     expect(isDangerousHostEnvVarName("BASH_ENV")).toBe(true);
     expect(isDangerousHostEnvVarName("bash_env")).toBe(true);
     expect(isDangerousHostEnvVarName("SHELL")).toBe(true);
@@ -35,6 +39,8 @@ describe("sanitizeHostExecEnv", () => {
         BASH_ENV: "/tmp/pwn.sh",
         GIT_EXTERNAL_DIFF: "/tmp/pwn.sh",
         LD_PRELOAD: "/tmp/pwn.so",
+        PYTHONUSERBASE: "/tmp/evil-user",
+        CMAKE_TOOLCHAIN_FILE: "/tmp/evil-toolchain.cmake",
         OK: "1",
       },
     });
@@ -63,12 +69,16 @@ describe("sanitizeHostExecEnv", () => {
         GIT_CONFIG_GLOBAL: "/tmp/gitconfig",
         SHELLOPTS: "xtrace",
         PS4: "$(touch /tmp/pwned)",
+        PYTHONUSERBASE: "/tmp/evil-user",
+        CMAKE_TOOLCHAIN_FILE: "/tmp/evil-toolchain.cmake",
         SAFE: "ok",
       },
     });
 
     expect(env.PATH).toBe("/usr/bin:/bin");
     expect(env.BASH_ENV).toBeUndefined();
+    expect(env.PYTHONUSERBASE).toBeUndefined();
+    expect(env.CMAKE_TOOLCHAIN_FILE).toBeUndefined();
     expect(env.GIT_SSH_COMMAND).toBeUndefined();
     expect(env.EDITOR).toBeUndefined();
     expect(env.NPM_CONFIG_USERCONFIG).toBeUndefined();

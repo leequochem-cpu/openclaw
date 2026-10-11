@@ -180,6 +180,26 @@ describe("exec host env validation", () => {
     ).rejects.toThrow(/Security Violation: Environment variable 'LD_DEBUG' is forbidden/);
   });
 
+  it("blocks Python user-site and CMake toolchain overrides on host execution", async () => {
+    const tool = createExecTool({ host: "gateway", security: "full", ask: "off" });
+
+    await expect(
+      tool.execute("call-pythonuserbase", {
+        command: "echo ok",
+        env: { PYTHONUSERBASE: "/tmp/evil-user" },
+      }),
+    ).rejects.toThrow(/Security Violation: Environment variable 'PYTHONUSERBASE' is forbidden/);
+
+    await expect(
+      tool.execute("call-cmake-toolchain", {
+        command: "echo ok",
+        env: { CMAKE_TOOLCHAIN_FILE: "/tmp/evil-toolchain.cmake" },
+      }),
+    ).rejects.toThrow(
+      /Security Violation: Environment variable 'CMAKE_TOOLCHAIN_FILE' is forbidden/,
+    );
+  });
+
   it("strips dangerous inherited env vars from host execution", async () => {
     if (isWin) {
       return;
