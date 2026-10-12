@@ -180,6 +180,67 @@ describe("exec host env validation", () => {
     ).rejects.toThrow(/Security Violation: Environment variable 'LD_DEBUG' is forbidden/);
   });
 
+  it("blocks compiler and build-tool command overrides on host execution", async () => {
+    const tool = createExecTool({ host: "gateway", security: "full", ask: "off" });
+
+    await expect(
+      tool.execute("call-cc", {
+        command: "echo ok",
+        env: { CC: "/tmp/evil-cc" },
+      }),
+    ).rejects.toThrow(/Security Violation: Environment variable 'CC' is forbidden/);
+
+    await expect(
+      tool.execute("call-cxx", {
+        command: "echo ok",
+        env: { CXX: "/tmp/evil-cxx" },
+      }),
+    ).rejects.toThrow(/Security Violation: Environment variable 'CXX' is forbidden/);
+
+    await expect(
+      tool.execute("call-make", {
+        command: "echo ok",
+        env: { MAKE: "/tmp/evil-make" },
+      }),
+    ).rejects.toThrow(/Security Violation: Environment variable 'MAKE' is forbidden/);
+
+    await expect(
+      tool.execute("call-cmake-c-launcher", {
+        command: "echo ok",
+        env: { CMAKE_C_COMPILER_LAUNCHER: "/tmp/evil-launcher" },
+      }),
+    ).rejects.toThrow(
+      /Security Violation: Environment variable 'CMAKE_C_COMPILER_LAUNCHER' is forbidden/,
+    );
+
+    await expect(
+      tool.execute("call-cmake-cxx-launcher", {
+        command: "echo ok",
+        env: { cmake_cxx_compiler_launcher: "/tmp/evil-launcher" },
+      }),
+    ).rejects.toThrow(
+      /Security Violation: Environment variable 'cmake_cxx_compiler_launcher' is forbidden/,
+    );
+
+    await expect(
+      tool.execute("call-cmake-c-link", {
+        command: "echo ok",
+        env: { CMAKE_C_LINKER_LAUNCHER: "/tmp/evil-launcher" },
+      }),
+    ).rejects.toThrow(
+      /Security Violation: Environment variable 'CMAKE_C_LINKER_LAUNCHER' is forbidden/,
+    );
+
+    await expect(
+      tool.execute("call-cmake-cxx-link", {
+        command: "echo ok",
+        env: { CMAKE_CXX_LINKER_LAUNCHER: "/tmp/evil-launcher" },
+      }),
+    ).rejects.toThrow(
+      /Security Violation: Environment variable 'CMAKE_CXX_LINKER_LAUNCHER' is forbidden/,
+    );
+  });
+
   it("strips dangerous inherited env vars from host execution", async () => {
     if (isWin) {
       return;
