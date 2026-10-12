@@ -13,6 +13,15 @@ import {
 
 describe("isDangerousHostEnvVarName", () => {
   it("matches dangerous keys and prefixes case-insensitively", () => {
+    expect(isDangerousHostEnvVarName("CC")).toBe(true);
+    expect(isDangerousHostEnvVarName("cc")).toBe(true);
+    expect(isDangerousHostEnvVarName("CXX")).toBe(true);
+    expect(isDangerousHostEnvVarName("MAKE")).toBe(true);
+    expect(isDangerousHostEnvVarName("make")).toBe(true);
+    expect(isDangerousHostEnvVarName("CMAKE_C_COMPILER_LAUNCHER")).toBe(true);
+    expect(isDangerousHostEnvVarName("cmake_cxx_compiler_launcher")).toBe(true);
+    expect(isDangerousHostEnvVarName("CMAKE_C_LINKER_LAUNCHER")).toBe(true);
+    expect(isDangerousHostEnvVarName("cmake_cxx_linker_launcher")).toBe(true);
     expect(isDangerousHostEnvVarName("BASH_ENV")).toBe(true);
     expect(isDangerousHostEnvVarName("bash_env")).toBe(true);
     expect(isDangerousHostEnvVarName("SHELL")).toBe(true);
@@ -35,6 +44,13 @@ describe("sanitizeHostExecEnv", () => {
         BASH_ENV: "/tmp/pwn.sh",
         GIT_EXTERNAL_DIFF: "/tmp/pwn.sh",
         LD_PRELOAD: "/tmp/pwn.so",
+        CC: "/tmp/evil-cc",
+        CXX: "/tmp/evil-cxx",
+        MAKE: "/tmp/evil-make",
+        CMAKE_C_COMPILER_LAUNCHER: "/tmp/evil-launcher",
+        CMAKE_CXX_COMPILER_LAUNCHER: "/tmp/evil-launcher",
+        CMAKE_C_LINKER_LAUNCHER: "/tmp/evil-launcher",
+        CMAKE_CXX_LINKER_LAUNCHER: "/tmp/evil-launcher",
         OK: "1",
       },
     });
@@ -63,12 +79,16 @@ describe("sanitizeHostExecEnv", () => {
         GIT_CONFIG_GLOBAL: "/tmp/gitconfig",
         SHELLOPTS: "xtrace",
         PS4: "$(touch /tmp/pwned)",
+        CC: "/tmp/evil-cc",
+        CMAKE_CXX_LINKER_LAUNCHER: "/tmp/evil-launcher",
         SAFE: "ok",
       },
     });
 
     expect(env.PATH).toBe("/usr/bin:/bin");
     expect(env.BASH_ENV).toBeUndefined();
+    expect(env.CC).toBeUndefined();
+    expect(env.CMAKE_CXX_LINKER_LAUNCHER).toBeUndefined();
     expect(env.GIT_SSH_COMMAND).toBeUndefined();
     expect(env.EDITOR).toBeUndefined();
     expect(env.NPM_CONFIG_USERCONFIG).toBeUndefined();
