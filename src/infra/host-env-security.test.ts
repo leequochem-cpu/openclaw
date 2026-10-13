@@ -17,6 +17,8 @@ describe("isDangerousHostEnvVarName", () => {
     expect(isDangerousHostEnvVarName("bash_env")).toBe(true);
     expect(isDangerousHostEnvVarName("SHELL")).toBe(true);
     expect(isDangerousHostEnvVarName("GIT_EXTERNAL_DIFF")).toBe(true);
+    expect(isDangerousHostEnvVarName("GIT_ALLOW_PROTOCOL")).toBe(true);
+    expect(isDangerousHostEnvVarName("git_allow_protocol")).toBe(true);
     expect(isDangerousHostEnvVarName("SHELLOPTS")).toBe(true);
     expect(isDangerousHostEnvVarName("ps4")).toBe(true);
     expect(isDangerousHostEnvVarName("DYLD_INSERT_LIBRARIES")).toBe(true);
@@ -34,6 +36,7 @@ describe("sanitizeHostExecEnv", () => {
         PATH: "/usr/bin:/bin",
         BASH_ENV: "/tmp/pwn.sh",
         GIT_EXTERNAL_DIFF: "/tmp/pwn.sh",
+        GIT_ALLOW_PROTOCOL: "ext",
         LD_PRELOAD: "/tmp/pwn.so",
         OK: "1",
       },
@@ -58,6 +61,7 @@ describe("sanitizeHostExecEnv", () => {
         ZDOTDIR: "/tmp/evil-zdotdir",
         BASH_ENV: "/tmp/pwn.sh",
         GIT_SSH_COMMAND: "touch /tmp/pwned",
+        GIT_ALLOW_PROTOCOL: "ext",
         EDITOR: "/tmp/editor",
         NPM_CONFIG_USERCONFIG: "/tmp/npmrc",
         GIT_CONFIG_GLOBAL: "/tmp/gitconfig",
@@ -70,6 +74,7 @@ describe("sanitizeHostExecEnv", () => {
     expect(env.PATH).toBe("/usr/bin:/bin");
     expect(env.BASH_ENV).toBeUndefined();
     expect(env.GIT_SSH_COMMAND).toBeUndefined();
+    expect(env.GIT_ALLOW_PROTOCOL).toBeUndefined();
     expect(env.EDITOR).toBeUndefined();
     expect(env.NPM_CONFIG_USERCONFIG).toBeUndefined();
     expect(env.GIT_CONFIG_GLOBAL).toBeUndefined();

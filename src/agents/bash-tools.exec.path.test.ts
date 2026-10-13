@@ -180,6 +180,24 @@ describe("exec host env validation", () => {
     ).rejects.toThrow(/Security Violation: Environment variable 'LD_DEBUG' is forbidden/);
   });
 
+  it("blocks Git ext-transport overrides on host execution", async () => {
+    const tool = createExecTool({ host: "gateway", security: "full", ask: "off" });
+
+    await expect(
+      tool.execute("call-git-allow-protocol", {
+        command: "echo ok",
+        env: { GIT_ALLOW_PROTOCOL: "ext" },
+      }),
+    ).rejects.toThrow(/Security Violation: Environment variable 'GIT_ALLOW_PROTOCOL' is forbidden/);
+
+    await expect(
+      tool.execute("call-git-allow-protocol-lower", {
+        command: "echo ok",
+        env: { git_allow_protocol: "https:ext" },
+      }),
+    ).rejects.toThrow(/Security Violation: Environment variable 'git_allow_protocol' is forbidden/);
+  });
+
   it("strips dangerous inherited env vars from host execution", async () => {
     if (isWin) {
       return;
