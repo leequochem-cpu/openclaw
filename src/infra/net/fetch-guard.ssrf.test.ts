@@ -33,9 +33,13 @@ describe("fetchWithSsrFGuard hardening", () => {
   const createPublicLookup = (): LookupFn =>
     vi.fn(async () => [{ address: "93.184.216.34", family: 4 }]) as unknown as LookupFn;
 
-  const getSecondRequestHeaders = (fetchImpl: ReturnType<typeof vi.fn>): Headers => {
+  const getSecondRequestInit = (fetchImpl: ReturnType<typeof vi.fn>): RequestInit => {
     const [, secondInit] = fetchImpl.mock.calls[1] as [string, RequestInit];
-    return new Headers(secondInit.headers);
+    return secondInit;
+  };
+
+  const getSecondRequestHeaders = (fetchImpl: ReturnType<typeof vi.fn>): Headers => {
+    return new Headers(getSecondRequestInit(fetchImpl).headers);
   };
 
   async function runProxyModeDispatcherTest(params: {
@@ -208,6 +212,174 @@ describe("fetchWithSsrFGuard hardening", () => {
 
     const headers = getSecondRequestHeaders(fetchImpl);
     expect(headers.get("authorization")).toBe("Bearer secret");
+    await result.release();
+  });
+
+  it("rewrites POST redirects to GET and clears the body for cross-origin 302 responses", async () => {
+    const lookupFn = createPublicLookup();
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(redirectResponse("https://cdn.example.com/collect"))
+      .mockResolvedValueOnce(okResponse());
+
+    const result = await fetchWithSsrFGuard({
+      url: "https://api.example.com/login",
+      fetchImpl,
+      lookupFn,
+      init: {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer secret",
+          "Content-Type": "application/x-www-form-urlencoded",
+          "Content-Length": "19",
+        },
+        body: "password=hunter2",
+      },
+    });
+
+    const secondInit = getSecondRequestInit(fetchImpl);
+    const headers = getSecondRequestHeaders(fetchImpl);
+    expect(secondInit.method).toBe("GET");
+    expect(secondInit.body).toBeUndefined();
+    expect(headers.get("authorization")).toBeNull();
+    expect(headers.get("content-type")).toBeNull();
+    expect(headers.get("content-length")).toBeNull();
+    await result.release();
+  });
+
+  it("rewrites same-origin 302 POST redirects to GET and preserves auth headers", async () => {
+    const lookupFn = createPublicLookup();
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(redirectResponse("https://api.example.com/next"))
+      .mockResolvedValueOnce(okResponse());
+
+    const result = await fetchWithSsrFGuard({
+      url: "https://api.example.com/login",
+      fetchImpl,
+      lookupFn,
+      init: {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer secret",
+          "Content-Type": "application/x-www-form-urlencoded",
+          "Content-Length": "19",
+        },
+        body: "password=hunter2",
+      },
+    });
+
+    const secondInit = getSecondRequestInit(fetchImpl);
+    const headers = getSecondRequestHeaders(fetchImpl);
+    expect(secondInit.method).toBe("GET");
+    expect(secondInit.body).toBeUndefined();
+    expect(headers.get("authorization")).toBe("Bearer secret");
+    expect(headers.get("content-type")).toBeNull();
+    expect(headers.get("content-length")).toBeNull();
+    await result.release();
+  });
+
+  it("drops unsafe bodies for cross-origin 307 redirects", async () => {
+    const lookupFn = createPublicLookup();
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(null, {
+          status: 307,
+          headers: { location: "https://cdn.example.com/upload-2" },
+        }),
+      )
+      .mockResolvedValueOnce(okResponse());
+
+    const result = await fetchWithSsrFGuard({
+      url: "https://api.example.com/upload",
+      fetchImpl,
+      lookupFn,
+      init: {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer secret",
+          "Content-Type": "application/json",
+        },
+        body: '{"secret":"123"}',
+      },
+    });
+
+    const secondInit = getSecondRequestInit(fetchImpl);
+    const headers = getSecondRequestHeaders(fetchImpl);
+    expect(secondInit.method).toBe("POST");
+    expect(secondInit.body).toBeUndefined();
+    expect(headers.get("authorization")).toBeNull();
+    expect(headers.get("content-type")).toBeNull();
+    await result.release();
+  });
+
+  it("preserves method and body for same-origin 307 redirects", async () => {
+    const lookupFn = createPublicLookup();
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(null, {
+          status: 307,
+          headers: { location: "https://api.example.com/upload-2" },
+        }),
+      )
+      .mockResolvedValueOnce(okResponse());
+
+    const result = await fetchWithSsrFGuard({
+      url: "https://api.example.com/upload",
+      fetchImpl,
+      lookupFn,
+      init: {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: '{"secret":"123"}',
+      },
+    });
+
+    const secondInit = getSecondRequestInit(fetchImpl);
+    const headers = getSecondRequestHeaders(fetchImpl);
+    expect(secondInit.method).toBe("POST");
+    expect(secondInit.body).toBe('{"secret":"123"}');
+    expect(headers.get("content-type")).toBe("application/json");
+    await result.release();
+  });
+
+  it("preserves unsafe cross-origin 307 bodies only when explicitly enabled", async () => {
+    const lookupFn = createPublicLookup();
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(null, {
+          status: 307,
+          headers: { location: "https://cdn.example.com/upload-2" },
+        }),
+      )
+      .mockResolvedValueOnce(okResponse());
+
+    const result = await fetchWithSsrFGuard({
+      url: "https://api.example.com/upload",
+      fetchImpl,
+      lookupFn,
+      allowCrossOriginUnsafeRedirectReplay: true,
+      init: {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer secret",
+          "Content-Type": "application/json",
+        },
+        body: '{"secret":"123"}',
+      },
+    });
+
+    const secondInit = getSecondRequestInit(fetchImpl);
+    const headers = getSecondRequestHeaders(fetchImpl);
+    expect(secondInit.method).toBe("POST");
+    expect(secondInit.body).toBe('{"secret":"123"}');
+    expect(headers.get("authorization")).toBeNull();
+    expect(headers.get("content-type")).toBe("application/json");
     await result.release();
   });
 

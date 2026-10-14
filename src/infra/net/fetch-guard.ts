@@ -25,6 +25,12 @@ export type GuardedFetchOptions = {
   fetchImpl?: FetchLike;
   init?: RequestInit;
   maxRedirects?: number;
+  /**
+   * Allow replaying unsafe request methods and bodies across cross-origin redirects.
+   * Sensitive cross-origin headers (for example Authorization/Cookie) are still stripped.
+   * Defaults to false.
+   */
+  allowCrossOriginUnsafeRedirectReplay?: boolean;
   timeoutMs?: number;
   signal?: AbortSignal;
   policy?: SsrFPolicy;
@@ -104,6 +110,68 @@ function retainSafeHeadersForCrossOriginRedirect(init?: RequestInit): RequestIni
     }
   }
   return { ...init, headers };
+}
+
+function dropBodyHeaders(headers?: HeadersInit): HeadersInit | undefined {
+  if (!headers) {
+    return headers;
+  }
+  const nextHeaders = new Headers(headers);
+  nextHeaders.delete("content-encoding");
+  nextHeaders.delete("content-language");
+  nextHeaders.delete("content-length");
+  nextHeaders.delete("content-location");
+  nextHeaders.delete("content-type");
+  nextHeaders.delete("transfer-encoding");
+  return nextHeaders;
+}
+
+function rewriteRedirectInitForMethod(params: {
+  init?: RequestInit;
+  status: number;
+}): RequestInit | undefined {
+  const { init, status } = params;
+  if (!init) {
+    return init;
+  }
+
+  const currentMethod = init.method?.toUpperCase() ?? "GET";
+  const shouldForceGet =
+    status === 303
+      ? currentMethod !== "GET" && currentMethod !== "HEAD"
+      : (status === 301 || status === 302) && currentMethod === "POST";
+
+  if (!shouldForceGet) {
+    return init;
+  }
+
+  return {
+    ...init,
+    method: "GET",
+    body: undefined,
+    headers: dropBodyHeaders(init.headers),
+  };
+}
+
+function rewriteRedirectInitForCrossOrigin(params: {
+  init?: RequestInit;
+  allowUnsafeReplay: boolean;
+}): RequestInit | undefined {
+  const { init, allowUnsafeReplay } = params;
+  if (!init || allowUnsafeReplay) {
+    return init;
+  }
+
+  const currentMethod = init.method?.toUpperCase() ?? "GET";
+  if (currentMethod === "GET" || currentMethod === "HEAD") {
+    return init;
+  }
+
+  return {
+    ...init,
+    body: undefined,
+    headers: dropBodyHeaders(init.headers),
+  };
 }
 
 function buildAbortSignal(params: { timeoutMs?: number; signal?: AbortSignal }): {
@@ -225,7 +293,12 @@ export async function fetchWithSsrFGuard(params: GuardedFetchOptions): Promise<G
           await release(dispatcher);
           throw new Error("Redirect loop detected");
         }
+        currentInit = rewriteRedirectInitForMethod({ init: currentInit, status: response.status });
         if (nextParsedUrl.origin !== parsedUrl.origin) {
+          currentInit = rewriteRedirectInitForCrossOrigin({
+            init: currentInit,
+            allowUnsafeReplay: params.allowCrossOriginUnsafeRedirectReplay === true,
+          });
           currentInit = retainSafeHeadersForCrossOriginRedirect(currentInit);
         }
         visited.add(nextUrl);
