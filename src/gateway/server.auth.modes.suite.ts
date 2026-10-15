@@ -162,7 +162,8 @@ export function registerAuthModesSuite(): void {
       const res = await connectReq(ws, { token: "secret", device: null });
       expect(res.ok).toBe(true);
       const status = await rpcReq(ws, "status");
-      expect(status.ok).toBe(true);
+      expect(status.ok).toBe(false);
+      expect(status.error?.message ?? "").toContain("missing scope");
       const health = await rpcReq(ws, "health");
       expect(health.ok).toBe(true);
       ws.close();
