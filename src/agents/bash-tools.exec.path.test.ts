@@ -169,6 +169,17 @@ describe("exec PATH login shell merge", () => {
 });
 
 describe("exec host env validation", () => {
+  it("blocks GIT_EXEC_PATH on host execution", async () => {
+    const tool = createExecTool({ host: "gateway", security: "full", ask: "off" });
+
+    await expect(
+      tool.execute("call1", {
+        command: "git --exec-path",
+        env: { GIT_EXEC_PATH: "/tmp/evil-git-exec-path" },
+      }),
+    ).rejects.toThrow(/Security Violation: Environment variable 'GIT_EXEC_PATH' is forbidden/);
+  });
+
   it("blocks LD_/DYLD_ env vars on host execution", async () => {
     const tool = createExecTool({ host: "gateway", security: "full", ask: "off" });
 
