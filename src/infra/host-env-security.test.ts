@@ -17,6 +17,7 @@ describe("isDangerousHostEnvVarName", () => {
     expect(isDangerousHostEnvVarName("bash_env")).toBe(true);
     expect(isDangerousHostEnvVarName("SHELL")).toBe(true);
     expect(isDangerousHostEnvVarName("GIT_EXTERNAL_DIFF")).toBe(true);
+    expect(isDangerousHostEnvVarName("git_exec_path")).toBe(true);
     expect(isDangerousHostEnvVarName("SHELLOPTS")).toBe(true);
     expect(isDangerousHostEnvVarName("ps4")).toBe(true);
     expect(isDangerousHostEnvVarName("DYLD_INSERT_LIBRARIES")).toBe(true);
@@ -34,6 +35,7 @@ describe("sanitizeHostExecEnv", () => {
         PATH: "/usr/bin:/bin",
         BASH_ENV: "/tmp/pwn.sh",
         GIT_EXTERNAL_DIFF: "/tmp/pwn.sh",
+        GIT_EXEC_PATH: "/tmp/git-exec-path",
         LD_PRELOAD: "/tmp/pwn.so",
         OK: "1",
       },
@@ -257,5 +259,59 @@ describe("git env exploit regression", () => {
     });
 
     expect(fs.existsSync(marker)).toBe(false);
+  });
+
+  it("blocks GIT_EXEC_PATH so git cannot run a replacement remote helper", async () => {
+    if (process.platform === "win32") {
+      return;
+    }
+    const gitPath = "/usr/bin/git";
+    if (!fs.existsSync(gitPath)) {
+      return;
+    }
+
+    const helperDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-git-exec-path-"));
+    const helperPath = path.join(helperDir, "git-remote-https");
+    const marker = path.join(
+      os.tmpdir(),
+      `openclaw-git-exec-path-marker-${process.pid}-${Date.now()}`,
+    );
+    fs.writeFileSync(helperPath, `#!/bin/sh\ntouch ${JSON.stringify(marker)}\nexit 1\n`, "utf8");
+    fs.chmodSync(helperPath, 0o755);
+
+    const baseEnv = {
+      PATH: process.env.PATH ?? "/usr/bin:/bin",
+      GIT_TERMINAL_PROMPT: "0",
+    };
+    const target = "https://127.0.0.1:1/does-not-matter";
+
+    try {
+      await new Promise<void>((resolve) => {
+        const child = spawn(gitPath, ["ls-remote", target], {
+          env: { ...baseEnv, GIT_EXEC_PATH: helperDir },
+          stdio: "ignore",
+        });
+        child.once("error", () => resolve());
+        child.once("close", () => resolve());
+      });
+      expect(fs.existsSync(marker)).toBe(true);
+      fs.unlinkSync(marker);
+
+      const safeEnv = sanitizeHostExecEnv({
+        baseEnv: { ...baseEnv, GIT_EXEC_PATH: helperDir },
+        overrides: { GIT_EXEC_PATH: helperDir },
+      });
+      expect(safeEnv.GIT_EXEC_PATH).toBeUndefined();
+
+      await new Promise<void>((resolve) => {
+        const child = spawn(gitPath, ["ls-remote", target], { env: safeEnv, stdio: "ignore" });
+        child.once("error", () => resolve());
+        child.once("close", () => resolve());
+      });
+      expect(fs.existsSync(marker)).toBe(false);
+    } finally {
+      fs.rmSync(helperDir, { recursive: true, force: true });
+      fs.rmSync(marker, { force: true });
+    }
   });
 });
