@@ -23,10 +23,13 @@ function buildMediaLocalRoots(
 ): string[] {
   const resolvedStateDir = path.resolve(stateDir);
   const preferredTmpDir = options.preferredTmpDir ?? resolveCachedPreferredTmpDir();
+  // Do not grant `<state>/agents`. That tree holds auth-profiles.json and session
+  // transcripts. Outbound MEDIA: delivery reads any file under these roots, so a
+  // model-emitted path such as `~/.openclaw/agents/main/agent/auth-profiles.json`
+  // would otherwise be loaded and sent to the chat.
   return [
     preferredTmpDir,
     path.join(resolvedStateDir, "media"),
-    path.join(resolvedStateDir, "agents"),
     path.join(resolvedStateDir, "workspace"),
     path.join(resolvedStateDir, "sandboxes"),
   ];
