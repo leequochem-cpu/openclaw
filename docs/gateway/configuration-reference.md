@@ -2546,8 +2546,8 @@ Auth: `Authorization: Bearer <token>` or `x-openclaw-token: <token>`.
 - Templates like `{{messages[0].subject}}` read from the payload.
 - `transform` can point to a JS/TS module returning a hook action.
   - `transform.module` must be a relative path and stays within `hooks.transformsDir` (absolute paths and traversal are rejected).
-- `agentId` routes to a specific agent; unknown IDs fall back to default.
-- `allowedAgentIds`: restricts explicit routing (`*` or omitted = allow all, `[]` = deny all).
+- `agentId` routes to a specific agent; unknown IDs fall back to the default agent.
+- `allowedAgentIds`: restricts the effective agent, including default-agent routing when `agentId` is omitted or blank (`*` or omitted = allow all, `[]` = deny all).
 - `defaultSessionKey`: optional fixed session key for hook agent runs without explicit `sessionKey`.
 - `allowRequestSessionKey`: allow `/hooks/agent` callers to set `sessionKey` (default: `false`).
 - `allowedSessionKeyPrefixes`: optional prefix allowlist for explicit `sessionKey` values (request + mapping), e.g. `["hook:"]`.

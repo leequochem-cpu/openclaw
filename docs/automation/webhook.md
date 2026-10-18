@@ -147,7 +147,7 @@ Mapping options (summary):
 - Set `deliver: true` + `channel`/`to` on mappings to route replies to a chat surface
   (`channel` defaults to `last` and falls back to WhatsApp).
 - `agentId` routes the hook to a specific agent; unknown IDs fall back to the default agent.
-- `hooks.allowedAgentIds` restricts explicit `agentId` routing. Omit it (or include `*`) to allow any agent. Set `[]` to deny explicit `agentId` routing.
+- `hooks.allowedAgentIds` restricts the effective agent, including the default agent used when `agentId` is omitted or blank. Omit it (or include `*`) to allow any agent. Set `[]` to deny all hook agent runs.
 - `hooks.defaultSessionKey` sets the default session for hook agent runs when no explicit key is provided.
 - `hooks.allowRequestSessionKey` controls whether `/hooks/agent` payloads may set `sessionKey` (default: `false`).
 - `hooks.allowedSessionKeyPrefixes` optionally restricts explicit `sessionKey` values from request payloads and mappings.
@@ -206,7 +206,7 @@ curl -X POST http://127.0.0.1:18789/hooks/gmail \
 - Keep hook endpoints behind loopback, tailnet, or trusted reverse proxy.
 - Use a dedicated hook token; do not reuse gateway auth tokens.
 - Repeated auth failures are rate-limited per client address to slow brute-force attempts.
-- If you use multi-agent routing, set `hooks.allowedAgentIds` to limit explicit `agentId` selection.
+- If you use multi-agent routing, set `hooks.allowedAgentIds` to the agents a hook may run, including the default agent when `agentId` is omitted.
 - Keep `hooks.allowRequestSessionKey=false` unless you require caller-selected sessions.
 - If you enable request `sessionKey`, restrict `hooks.allowedSessionKeyPrefixes` (for example, `["hook:"]`).
 - Avoid including sensitive raw payloads in webhook logs.
