@@ -291,15 +291,20 @@ describe("gateway server hooks", () => {
     };
     setMainAndHooksAgents();
     await withGatewayServer(async ({ port }) => {
-      mockIsolatedRunOkOnce();
       const resNoAgent = await postHook(port, "/hooks/agent", { message: "No explicit agent" });
-      expect(resNoAgent.status).toBe(200);
-      await waitForSystemEvent();
-      const noAgentCall = (cronIsolatedRun.mock.calls[0] as unknown[] | undefined)?.[0] as {
-        job?: { agentId?: string };
-      };
-      expect(noAgentCall?.job?.agentId).toBeUndefined();
-      drainSystemEvents(resolveMainKey());
+      expect(resNoAgent.status).toBe(400);
+      const noAgentBody = (await resNoAgent.json()) as { error?: string };
+      expect(noAgentBody.error).toContain("hooks.allowedAgentIds");
+      expect(cronIsolatedRun).not.toHaveBeenCalled();
+
+      const resBlankAgent = await postHook(port, "/hooks/agent", {
+        message: "Blank agent",
+        agentId: " ",
+      });
+      expect(resBlankAgent.status).toBe(400);
+      const blankAgentBody = (await resBlankAgent.json()) as { error?: string };
+      expect(blankAgentBody.error).toContain("hooks.allowedAgentIds");
+      expect(cronIsolatedRun).not.toHaveBeenCalled();
 
       mockIsolatedRunOkOnce();
       const resAllowed = await postHook(port, "/hooks/agent", {
@@ -340,6 +345,14 @@ describe("gateway server hooks", () => {
       list: [{ id: "main", default: true }, { id: "hooks" }],
     };
     await withGatewayServer(async ({ port }) => {
+      const resNoAgent = await postHook(port, "/hooks/agent", {
+        message: "Denied by omission",
+      });
+      expect(resNoAgent.status).toBe(400);
+      const noAgentBody = (await resNoAgent.json()) as { error?: string };
+      expect(noAgentBody.error).toContain("hooks.allowedAgentIds");
+      expect(cronIsolatedRun).not.toHaveBeenCalled();
+
       const resDenied = await postHook(port, "/hooks/agent", {
         message: "Denied",
         agentId: "hooks",
@@ -348,6 +361,34 @@ describe("gateway server hooks", () => {
       const deniedBody = (await resDenied.json()) as { error?: string };
       expect(deniedBody.error).toContain("hooks.allowedAgentIds");
       expect(peekSystemEvents(resolveMainKey()).length).toBe(0);
+    });
+  });
+
+  test("allows omitted agentId when the default agent is allowlisted", async () => {
+    testState.hooksConfig = {
+      enabled: true,
+      token: HOOK_TOKEN,
+      allowedAgentIds: ["main"],
+    };
+    setMainAndHooksAgents();
+    await withGatewayServer(async ({ port }) => {
+      mockIsolatedRunOkOnce();
+      const resNoAgent = await postHook(port, "/hooks/agent", { message: "Default target" });
+      expect(resNoAgent.status).toBe(200);
+      await waitForSystemEvent();
+      const noAgentCall = (cronIsolatedRun.mock.calls[0] as unknown[] | undefined)?.[0] as {
+        job?: { agentId?: string };
+      };
+      expect(noAgentCall?.job?.agentId).toBeUndefined();
+      drainSystemEvents(resolveMainKey());
+
+      cronIsolatedRun.mockClear();
+      const resOtherAgent = await postHook(port, "/hooks/agent", {
+        message: "Other agent",
+        agentId: "hooks",
+      });
+      expect(resOtherAgent.status).toBe(400);
+      expect(cronIsolatedRun).not.toHaveBeenCalled();
     });
   });
 

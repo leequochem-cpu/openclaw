@@ -278,21 +278,24 @@ export function resolveHookTargetAgentId(
   return hooksConfig.agentPolicy.defaultAgentId;
 }
 
+export function resolveEffectiveHookTargetAgentId(
+  hooksConfig: HooksConfigResolved,
+  agentId: string | undefined,
+): string {
+  return resolveHookTargetAgentId(hooksConfig, agentId) ?? hooksConfig.agentPolicy.defaultAgentId;
+}
+
 export function isHookAgentAllowed(
   hooksConfig: HooksConfigResolved,
   agentId: string | undefined,
 ): boolean {
-  // Keep backwards compatibility for callers that omit agentId.
-  const raw = agentId?.trim();
-  if (!raw) {
-    return true;
-  }
   const allowed = hooksConfig.agentPolicy.allowedAgentIds;
   if (allowed === undefined) {
     return true;
   }
-  const resolved = resolveHookTargetAgentId(hooksConfig, raw);
-  return resolved ? allowed.has(resolved) : false;
+  // Omitted or blank agentId still dispatches on the default agent, so the
+  // allowlist has to authorize that effective target before the run starts.
+  return allowed.has(resolveEffectiveHookTargetAgentId(hooksConfig, agentId));
 }
 
 export const getHookAgentPolicyError = () => "agentId is not allowed by hooks.allowedAgentIds";

@@ -1184,7 +1184,7 @@ export const FIELD_HELP: Record<string, string> = {
   "hooks.allowedSessionKeyPrefixes":
     "Allowlist of accepted session-key prefixes for inbound hook requests when caller-provided keys are enabled. Use narrow prefixes to prevent arbitrary session-key injection.",
   "hooks.allowedAgentIds":
-    "Allowlist of agent IDs that hook mappings are allowed to target when selecting execution agents. Use this to constrain automation events to dedicated service agents.",
+    "Allowlist of effective agent IDs that hook requests and mappings may target, including the default agent when agentId is omitted or blank. Use this to constrain webhook runs to dedicated service agents. Omit the list or include * to allow any agent; set [] to deny every hook agent run.",
   "hooks.maxBodyBytes":
     "Maximum accepted webhook payload size in bytes before the request is rejected. Keep this bounded to reduce abuse risk and protect memory usage under bursty integrations.",
   "hooks.presets":
