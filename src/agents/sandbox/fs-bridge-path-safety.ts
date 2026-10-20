@@ -23,6 +23,12 @@ export type AnchoredSandboxEntry = {
   basename: string;
 };
 
+export type PinnedSandboxWriteEntry = {
+  mountRootPath: string;
+  relativeParentPath: string;
+  basename: string;
+};
+
 type RunCommand = (
   script: string,
   options?: {
@@ -140,6 +146,33 @@ export class SandboxFsPathGuard {
     });
     return {
       canonicalParentPath,
+      basename,
+    };
+  }
+
+  resolvePinnedWriteEntry(target: SandboxResolvedFsPath, action: string): PinnedSandboxWriteEntry {
+    const basename = path.posix.basename(target.containerPath);
+    if (!basename || basename === "." || basename === ".." || basename.includes("/")) {
+      throw new Error(`Invalid sandbox entry target: ${target.containerPath}`);
+    }
+    const parentPath = normalizeContainerPath(path.posix.dirname(target.containerPath));
+    const mount = this.resolveRequiredMount(parentPath, action);
+    const relativeParentPath = path.posix.relative(
+      normalizeContainerPath(mount.containerRoot),
+      parentPath,
+    );
+    if (
+      relativeParentPath === ".." ||
+      relativeParentPath.startsWith("../") ||
+      path.posix.isAbsolute(relativeParentPath)
+    ) {
+      throw new Error(
+        `Sandbox path escapes allowed mounts; cannot ${action}: ${target.containerPath}`,
+      );
+    }
+    return {
+      mountRootPath: normalizeContainerPath(mount.containerRoot),
+      relativeParentPath: relativeParentPath === "." ? "" : relativeParentPath,
       basename,
     };
   }
