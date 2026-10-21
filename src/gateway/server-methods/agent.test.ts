@@ -409,34 +409,62 @@ describe("gateway agent handler", () => {
     expect(callArgs.bestEffortDeliver).toBe(false);
   });
 
-  it("only forwards workspaceDir for spawned subagent runs", async () => {
+  it("rejects public spawnedBy and workspaceDir overrides", async () => {
     primeMainAgentRun();
     mocks.agentCommand.mockClear();
 
-    await invokeAgent(
-      {
-        message: "normal run",
-        sessionKey: "agent:main:main",
-        workspaceDir: "/tmp/ignored",
-        idempotencyKey: "workspace-ignored",
-      },
-      { reqId: "workspace-ignored-1" },
-    );
-    await vi.waitFor(() => expect(mocks.agentCommand).toHaveBeenCalled());
-    const normalCall = mocks.agentCommand.mock.calls.at(-1)?.[0] as { workspaceDir?: string };
-    expect(normalCall.workspaceDir).toBeUndefined();
-    mocks.agentCommand.mockClear();
-
-    await invokeAgent(
+    const respond = await invokeAgent(
       {
         message: "spawned run",
         sessionKey: "agent:main:main",
         spawnedBy: "agent:main:subagent:parent",
         workspaceDir: "/tmp/inherited",
-        idempotencyKey: "workspace-forwarded",
+        idempotencyKey: "workspace-rejected",
       },
-      { reqId: "workspace-forwarded-1" },
+      { reqId: "workspace-rejected-1" },
     );
+
+    expect(respond).toHaveBeenCalledWith(
+      false,
+      undefined,
+      expect.objectContaining({
+        message: expect.stringContaining("invalid agent params"),
+      }),
+    );
+    expect(mocks.agentCommand).not.toHaveBeenCalled();
+  });
+
+  it("reuses the workspace persisted on a spawned session", async () => {
+    mockMainSessionEntry({
+      sessionId: "existing-session-id",
+      spawnedBy: "agent:main:main",
+      spawnedWorkspaceDir: "/tmp/inherited",
+    });
+    mocks.updateSessionStore.mockImplementation(async (_path, updater) => {
+      const store: Record<string, Record<string, unknown>> = {
+        "agent:main:main": {
+          sessionId: "existing-session-id",
+          updatedAt: Date.now(),
+          spawnedBy: "agent:main:main",
+          spawnedWorkspaceDir: "/tmp/inherited",
+        },
+      };
+      return await updater(store);
+    });
+    mocks.agentCommand.mockResolvedValue({
+      payloads: [{ text: "ok" }],
+      meta: { durationMs: 100 },
+    });
+
+    await invokeAgent(
+      {
+        message: "spawned run",
+        sessionKey: "agent:main:main",
+        idempotencyKey: "workspace-persisted",
+      },
+      { reqId: "workspace-persisted-1" },
+    );
+
     await vi.waitFor(() => expect(mocks.agentCommand).toHaveBeenCalled());
     const spawnedCall = mocks.agentCommand.mock.calls.at(-1)?.[0] as { workspaceDir?: string };
     expect(spawnedCall.workspaceDir).toBe("/tmp/inherited");

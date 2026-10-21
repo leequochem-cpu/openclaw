@@ -555,6 +555,33 @@ export async function spawnSubagentDirect(
 
   const childIdem = crypto.randomUUID();
   let childRunId: string = childIdem;
+  const spawnLineagePatchError = await patchChildSession({
+    spawnedBy: spawnedByKey,
+    ...(spawnedMetadata.workspaceDir ? { spawnedWorkspaceDir: spawnedMetadata.workspaceDir } : {}),
+  });
+  if (spawnLineagePatchError) {
+    if (attachmentAbsDir) {
+      try {
+        await fs.rm(attachmentAbsDir, { recursive: true, force: true });
+      } catch {
+        // Best-effort cleanup only.
+      }
+    }
+    await cleanupProvisionalSession(childSessionKey, {
+      emitLifecycleHooks: threadBindingReady,
+      deleteTranscript: true,
+    });
+    return {
+      status: "error",
+      error: spawnLineagePatchError,
+      childSessionKey,
+    };
+  }
+  const publicSpawnedMetadata = {
+    groupId: spawnedMetadata.groupId,
+    groupChannel: spawnedMetadata.groupChannel,
+    groupSpace: spawnedMetadata.groupSpace,
+  };
   try {
     const response = await callGateway<{ runId: string }>({
       method: "agent",
@@ -572,7 +599,7 @@ export async function spawnSubagentDirect(
         thinking: thinkingOverride,
         timeout: runTimeoutSeconds,
         label: label || undefined,
-        ...spawnedMetadata,
+        ...publicSpawnedMetadata,
       },
       timeoutMs: 10_000,
     });

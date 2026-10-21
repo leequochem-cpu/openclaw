@@ -78,6 +78,11 @@ export type SessionEntry = {
   sessionFile?: string;
   /** Parent session key that spawned this session (used for sandbox session-tool scoping). */
   spawnedBy?: string;
+  /**
+   * Workspace inherited by a spawned session. Set by the internal spawn path and
+   * reused on later turns. Public agent RPC callers cannot supply this.
+   */
+  spawnedWorkspaceDir?: string;
   /** True after a thread/topic session has been forked from its parent transcript once. */
   forkedFromParent?: boolean;
   /** Subagent spawn depth (0 = main, 1 = sub-agent, 2 = sub-sub-agent). */
