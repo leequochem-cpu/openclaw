@@ -302,6 +302,39 @@ describe("gateway sessions patch", () => {
     expectPatchError(result, "invalid groupActivation");
   });
 
+  test("persists spawnedWorkspaceDir once for subagent sessions", async () => {
+    const key = "agent:main:subagent:child";
+    const created = expectPatchOk(
+      await runPatch({
+        storeKey: key,
+        patch: { key, spawnedWorkspaceDir: " /tmp/inherited " },
+      }),
+    );
+    expect(created.spawnedWorkspaceDir).toBe("/tmp/inherited");
+
+    const unchanged = expectPatchOk(
+      await runPatch({
+        storeKey: key,
+        store: { [key]: created },
+        patch: { key, spawnedWorkspaceDir: "/tmp/inherited" },
+      }),
+    );
+    expect(unchanged.spawnedWorkspaceDir).toBe("/tmp/inherited");
+
+    const changed = await runPatch({
+      storeKey: key,
+      store: { [key]: created },
+      patch: { key, spawnedWorkspaceDir: "/tmp/other" },
+    });
+    expectPatchError(changed, "spawnedWorkspaceDir cannot be changed once set");
+
+    const mainSession = await runPatch({
+      storeKey: MAIN_SESSION_KEY,
+      patch: { key: MAIN_SESSION_KEY, spawnedWorkspaceDir: "/tmp/inherited" },
+    });
+    expectPatchError(mainSession, "spawnedWorkspaceDir is only supported for subagent:* sessions");
+  });
+
   test("allows target agent own model for subagent session even when missing from global allowlist", async () => {
     const cfg = makeKimiSubagentCfg({
       agentPrimaryModel: "synthetic/hf:moonshotai/Kimi-K2.5",

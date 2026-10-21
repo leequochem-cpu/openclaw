@@ -110,7 +110,14 @@ describe("sessions_spawn depth + child limits", () => {
       (call) => call[0] as { method?: string; params?: Record<string, unknown> },
     );
     const agentCall = calls.find((entry) => entry.method === "agent");
-    expect(agentCall?.params?.spawnedBy).toBe("agent:main:subagent:parent");
+    expect(agentCall?.params?.spawnedBy).toBeUndefined();
+    expect(agentCall?.params?.workspaceDir).toBeUndefined();
+    const lineagePatch = calls.find(
+      (entry) =>
+        entry.method === "sessions.patch" &&
+        entry.params?.spawnedBy === "agent:main:subagent:parent",
+    );
+    expect(lineagePatch?.params?.key).toMatch(/^agent:main:subagent:/);
 
     const spawnDepthPatch = calls.find(
       (entry) => entry.method === "sessions.patch" && entry.params?.spawnDepth === 2,
