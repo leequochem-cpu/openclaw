@@ -556,7 +556,10 @@ describe("gateway agent handler", () => {
         sessionKey: "agent:main:main",
         idempotencyKey: "test-idem-new",
       },
-      { reqId: "4" },
+      {
+        reqId: "4",
+        client: { connect: { scopes: ["operator.admin"] } } as AgentHandlerArgs["client"],
+      },
     );
 
     await vi.waitFor(() => expect(mocks.agentCommand).toHaveBeenCalled());
@@ -584,13 +587,44 @@ describe("gateway agent handler", () => {
         sessionKey: "agent:main:main",
         idempotencyKey: "test-idem-reset-suffix",
       },
-      { reqId: "4b" },
+      {
+        reqId: "4b",
+        client: { connect: { scopes: ["operator.admin"] } } as AgentHandlerArgs["client"],
+      },
     );
 
     const call = await expectResetCall("[Wed 2026-01-28 20:30 EST] check status");
     expect(call?.sessionId).toBe("reset-session-id");
 
     resetTimeConfig();
+  });
+
+  it("rejects /reset for write-scoped gateway callers", async () => {
+    mockMainSessionEntry({ sessionId: "existing-session-id" });
+    mocks.sessionsResetHandler.mockClear();
+    mocks.agentCommand.mockClear();
+
+    const respond = await invokeAgent(
+      {
+        message: "/reset",
+        sessionKey: "agent:main:main",
+        idempotencyKey: "test-reset-write-scope",
+      },
+      {
+        reqId: "4c",
+        client: { connect: { scopes: ["operator.write"] } } as AgentHandlerArgs["client"],
+      },
+    );
+
+    expect(mocks.sessionsResetHandler).not.toHaveBeenCalled();
+    expect(mocks.agentCommand).not.toHaveBeenCalled();
+    expect(respond).toHaveBeenCalledWith(
+      false,
+      undefined,
+      expect.objectContaining({
+        message: "missing scope: operator.admin",
+      }),
+    );
   });
 
   it("rejects malformed agent session keys early in agent handler", async () => {
