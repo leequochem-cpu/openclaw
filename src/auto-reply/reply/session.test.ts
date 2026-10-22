@@ -1473,6 +1473,54 @@ describe("initSessionState preserves behavior overrides across /new and /reset",
     archiveSpy.mockRestore();
   });
 
+  it("does not rotate webchat sessions for operator.write /reset", async () => {
+    const storePath = await createStorePath("openclaw-write-scope-reset-");
+    const sessionKey = "agent:main:main";
+    const existingSessionId = "sess-write-scope";
+    await writeSessionStoreFast(storePath, {
+      [sessionKey]: {
+        sessionId: existingSessionId,
+        updatedAt: Date.now(),
+      },
+    });
+    const cfg = { session: { store: storePath, idleMinutes: 999 } } as OpenClawConfig;
+
+    const denied = await initSessionState({
+      ctx: {
+        Body: "/reset",
+        RawBody: "/reset",
+        CommandBody: "/reset",
+        SessionKey: sessionKey,
+        Provider: "webchat",
+        Surface: "webchat",
+        GatewayClientScopes: ["operator.write"],
+      },
+      cfg,
+      commandAuthorized: true,
+    });
+
+    expect(denied.resetTriggered).toBe(false);
+    expect(denied.isNewSession).toBe(false);
+    expect(denied.sessionId).toBe(existingSessionId);
+
+    const allowed = await initSessionState({
+      ctx: {
+        Body: "/reset",
+        RawBody: "/reset",
+        CommandBody: "/reset",
+        SessionKey: sessionKey,
+        Provider: "webchat",
+        Surface: "webchat",
+        GatewayClientScopes: ["operator.admin"],
+      },
+      cfg,
+      commandAuthorized: true,
+    });
+
+    expect(allowed.resetTriggered).toBe(true);
+    expect(allowed.sessionId).not.toBe(existingSessionId);
+  });
+
   it("archives the old session transcript on daily/scheduled reset (stale session)", async () => {
     // Daily resets occur when the session becomes stale (not via /new or /reset command).
     // Previously, previousSessionEntry was only set when resetTriggered=true, leaving
