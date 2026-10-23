@@ -768,6 +768,74 @@ describe("handleCommands /allowlist", () => {
     expect(result.reply?.text).toContain("DM allowlist added");
   });
 
+  it("blocks /allowlist add from gateway clients without operator.admin", async () => {
+    const cfg = {
+      commands: { text: true, config: true },
+      channels: { telegram: { allowFrom: ["123"] } },
+    } as OpenClawConfig;
+    const params = buildPolicyParams("/allowlist add dm --channel telegram --config 789", cfg, {
+      Provider: INTERNAL_MESSAGE_CHANNEL,
+      Surface: INTERNAL_MESSAGE_CHANNEL,
+      GatewayClientScopes: ["operator.write"],
+    });
+    const result = await handleCommands(params);
+
+    expect(result.shouldContinue).toBe(false);
+    expect(result.reply?.text).toContain("requires operator.admin");
+    expect(writeConfigFileMock).not.toHaveBeenCalled();
+    expect(addChannelAllowFromStoreEntryMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps /allowlist list available to gateway operator.write clients", async () => {
+    readChannelAllowFromStoreMock.mockResolvedValueOnce([]);
+    const cfg = {
+      commands: { text: true, config: true },
+      channels: { telegram: { allowFrom: ["123"] } },
+    } as OpenClawConfig;
+    const params = buildPolicyParams("/allowlist list dm --channel telegram", cfg, {
+      Provider: INTERNAL_MESSAGE_CHANNEL,
+      Surface: INTERNAL_MESSAGE_CHANNEL,
+      GatewayClientScopes: ["operator.write"],
+    });
+    const result = await handleCommands(params);
+
+    expect(result.shouldContinue).toBe(false);
+    expect(result.reply?.text).toContain("DM allowFrom (config): 123");
+    expect(writeConfigFileMock).not.toHaveBeenCalled();
+  });
+
+  it("persists /allowlist add for gateway operator.admin clients", async () => {
+    readConfigFileSnapshotMock.mockResolvedValueOnce({
+      valid: true,
+      parsed: {
+        channels: { telegram: { allowFrom: ["123"] } },
+      },
+    });
+    validateConfigObjectWithPluginsMock.mockImplementation((config: unknown) => ({
+      ok: true,
+      config,
+    }));
+
+    const cfg = {
+      commands: { text: true, config: true },
+      channels: { telegram: { allowFrom: ["123"] } },
+    } as OpenClawConfig;
+    const params = buildPolicyParams("/allowlist add dm --channel telegram --config 789", cfg, {
+      Provider: INTERNAL_MESSAGE_CHANNEL,
+      Surface: INTERNAL_MESSAGE_CHANNEL,
+      GatewayClientScopes: ["operator.write", "operator.admin"],
+    });
+    const result = await handleCommands(params);
+
+    expect(result.shouldContinue).toBe(false);
+    expect(writeConfigFileMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channels: { telegram: { allowFrom: ["123", "789"] } },
+      }),
+    );
+    expect(result.reply?.text).toContain("DM allowlist added");
+  });
+
   it("writes store entries to the selected account scope", async () => {
     readConfigFileSnapshotMock.mockResolvedValueOnce({
       valid: true,
