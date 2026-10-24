@@ -4,8 +4,10 @@ import {
   startBrowserControlServiceFromConfig,
 } from "../../browser/control-service.js";
 import { applyBrowserProxyPaths, persistBrowserProxyFiles } from "../../browser/proxy-files.js";
+import { isPersistentBrowserProfileMutation } from "../../browser/request-policy.js";
 import { createBrowserRouteDispatcher } from "../../browser/routes/dispatcher.js";
 import { loadConfig } from "../../config/config.js";
+import { ADMIN_SCOPE } from "../method-scopes.js";
 import { isNodeCommandAllowed, resolveNodeCommandAllowlist } from "../node-command-policy.js";
 import type { NodeSession } from "../node-registry.js";
 import { ErrorCodes, errorShape } from "../protocol/index.js";
@@ -140,7 +142,7 @@ function applyProxyPaths(result: unknown, mapping: Map<string, string>) {
 }
 
 export const browserHandlers: GatewayRequestHandlers = {
-  "browser.request": async ({ params, respond, context }) => {
+  "browser.request": async ({ params, respond, context, client }) => {
     const typed = params as BrowserRequestParams;
     const methodRaw = typeof typed.method === "string" ? typed.method.trim().toUpperCase() : "";
     const path = typeof typed.path === "string" ? typed.path.trim() : "";
@@ -166,6 +168,19 @@ export const browserHandlers: GatewayRequestHandlers = {
         errorShape(ErrorCodes.INVALID_REQUEST, "method must be GET, POST, or DELETE"),
       );
       return;
+    }
+    // Create, delete, and reset write config or trash profile data. browser.request
+    // itself stays operator.write; those routes require operator.admin.
+    if (isPersistentBrowserProfileMutation(methodRaw, path)) {
+      const scopes = Array.isArray(client?.connect?.scopes) ? client.connect.scopes : [];
+      if (!scopes.includes(ADMIN_SCOPE)) {
+        respond(
+          false,
+          undefined,
+          errorShape(ErrorCodes.INVALID_REQUEST, `missing scope: ${ADMIN_SCOPE}`),
+        );
+        return;
+      }
     }
 
     const cfg = loadConfig();
