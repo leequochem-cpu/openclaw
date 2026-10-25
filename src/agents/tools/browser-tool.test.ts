@@ -259,6 +259,57 @@ describe("browser tool snapshot maxChars", () => {
     expect(browserClientMocks.browserStatus).not.toHaveBeenCalled();
   });
 
+  it("rejects node targets when sandbox host control is disabled", async () => {
+    mockSingleBrowserProxyNode();
+    const tool = createBrowserTool({
+      sandboxBridgeUrl: "http://127.0.0.1:9999",
+      allowHostControl: false,
+    });
+
+    await expect(tool.execute?.("call-1", { action: "status", target: "node" })).rejects.toThrow(
+      "Node browser control is disabled by sandbox policy.",
+    );
+    expect(gatewayMocks.callGatewayTool).not.toHaveBeenCalled();
+    expect(nodesUtilsMocks.listNodes).not.toHaveBeenCalled();
+  });
+
+  it("rejects an explicit node id when sandbox host control is disabled", async () => {
+    mockSingleBrowserProxyNode();
+    const tool = createBrowserTool({ allowHostControl: false });
+
+    await expect(tool.execute?.("call-1", { action: "status", node: "node-1" })).rejects.toThrow(
+      "Node browser control is disabled by sandbox policy.",
+    );
+    expect(gatewayMocks.callGatewayTool).not.toHaveBeenCalled();
+    expect(browserClientMocks.browserStatus).not.toHaveBeenCalled();
+  });
+
+  it("does not auto-route to a node when sandbox host control is disabled", async () => {
+    mockSingleBrowserProxyNode();
+    const tool = createBrowserTool({ allowHostControl: false });
+
+    await expect(tool.execute?.("call-1", { action: "status" })).rejects.toThrow(
+      "Host browser control is disabled by sandbox policy.",
+    );
+    expect(gatewayMocks.callGatewayTool).not.toHaveBeenCalled();
+    expect(nodesUtilsMocks.listNodes).not.toHaveBeenCalled();
+  });
+
+  it("keeps the sandbox browser when host control is disabled and a node is connected", async () => {
+    mockSingleBrowserProxyNode();
+    const tool = createBrowserTool({
+      sandboxBridgeUrl: "http://127.0.0.1:9999",
+      allowHostControl: false,
+    });
+    await tool.execute?.("call-1", { action: "status" });
+
+    expect(browserClientMocks.browserStatus).toHaveBeenCalledWith(
+      "http://127.0.0.1:9999",
+      expect.objectContaining({ profile: undefined }),
+    );
+    expect(gatewayMocks.callGatewayTool).not.toHaveBeenCalled();
+  });
+
   it("keeps sandbox bridge url when node proxy is available", async () => {
     mockSingleBrowserProxyNode();
     const tool = createBrowserTool({ sandboxBridgeUrl: "http://127.0.0.1:9999" });
