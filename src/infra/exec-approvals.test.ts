@@ -384,6 +384,18 @@ describe("exec approvals command resolution", () => {
     expect(resolution?.rawExecutable).toBe("bash");
     expect(resolution?.executableName.toLowerCase()).toContain("bash");
   });
+
+  it("unwraps time wrapper argv to resolve the effective executable", () => {
+    const fixture = createPathExecutableFixture();
+    const resolution = resolveCommandResolutionFromArgv(
+      ["/usr/bin/time", "-p", "rg", "-n", "needle"],
+      undefined,
+      makePathEnv(fixture.binDir),
+    );
+    expect(resolution?.resolvedPath).toBe(fixture.exePath);
+    expect(resolution?.executableName).toBe(fixture.exeName);
+    expect(resolution?.policyBlocked).not.toBe(true);
+  });
 });
 
 describe("exec approvals shell parsing", () => {
