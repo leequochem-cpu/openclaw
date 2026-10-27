@@ -20,6 +20,7 @@ const DISPATCH_WRAPPER_NAMES = [
   "ionice",
   "nice",
   "nohup",
+  "script",
   "setsid",
   "stdbuf",
   "sudo",
@@ -81,9 +82,11 @@ const ENV_INLINE_VALUE_PREFIXES = [
 const ENV_FLAG_OPTIONS = new Set(["-i", "--ignore-environment", "-0", "--null"]);
 const NICE_OPTIONS_WITH_VALUE = new Set(["-n", "--adjustment", "--priority"]);
 const STDBUF_OPTIONS_WITH_VALUE = new Set(["-i", "--input", "-o", "--output", "-e", "--error"]);
+const BSD_SCRIPT_FLAG_OPTIONS = new Set(["-a", "-d", "-k", "-p", "-q", "-r"]);
+const BSD_SCRIPT_OPTIONS_WITH_VALUE = new Set(["-F", "-t"]);
 const TIMEOUT_FLAG_OPTIONS = new Set(["--foreground", "--preserve-status", "-v", "--verbose"]);
 const TIMEOUT_OPTIONS_WITH_VALUE = new Set(["-k", "--kill-after", "-s", "--signal"]);
-const TRANSPARENT_DISPATCH_WRAPPERS = new Set(["nice", "nohup", "stdbuf", "timeout"]);
+const TRANSPARENT_DISPATCH_WRAPPERS = new Set(["nice", "nohup", "script", "stdbuf", "timeout"]);
 
 type ShellWrapperKind = "posix" | "cmd" | "powershell";
 
@@ -366,6 +369,51 @@ function unwrapStdbufInvocation(argv: string[]): string[] | null {
   });
 }
 
+function supportsScriptPositionalCommand(platform: NodeJS.Platform): boolean {
+  // macOS and FreeBSD script(1): `script [options] file command ...`.
+  // util-linux script uses `-c command` and rejects that positional form.
+  return platform === "darwin" || platform === "freebsd";
+}
+
+function unwrapScriptInvocation(argv: string[], platform: NodeJS.Platform): string[] | null {
+  if (!supportsScriptPositionalCommand(platform)) {
+    // Fail closed. Persisting the script binary would allow a later
+    // `script -c` (or any other script invocation) to reuse the approval.
+    return null;
+  }
+  return scanWrapperInvocation(argv, {
+    separators: new Set(["--"]),
+    onToken: (token, lower) => {
+      if (!lower.startsWith("-") || lower === "-") {
+        return "stop";
+      }
+      const [flag] = token.split("=", 2);
+      if (BSD_SCRIPT_OPTIONS_WITH_VALUE.has(flag)) {
+        return token.includes("=") ? "continue" : "consume-next";
+      }
+      if (BSD_SCRIPT_FLAG_OPTIONS.has(flag)) {
+        return "continue";
+      }
+      return "invalid";
+    },
+    adjustCommandIndex: (commandIndex, currentArgv) => {
+      let sawTranscript = false;
+      for (let idx = commandIndex; idx < currentArgv.length; idx += 1) {
+        const token = currentArgv[idx]?.trim() ?? "";
+        if (!token) {
+          continue;
+        }
+        if (!sawTranscript) {
+          sawTranscript = true;
+          continue;
+        }
+        return idx;
+      }
+      return null;
+    },
+  });
+}
+
 function unwrapTimeoutInvocation(argv: string[]): string[] | null {
   return unwrapDashOptionInvocation(argv, {
     onFlag: (flag, lower) => {
@@ -410,7 +458,10 @@ function unwrapDispatchWrapper(
     : blockDispatchWrapper(wrapper);
 }
 
-export function unwrapKnownDispatchWrapperInvocation(argv: string[]): DispatchWrapperUnwrapResult {
+export function unwrapKnownDispatchWrapperInvocation(
+  argv: string[],
+  platform: NodeJS.Platform = process.platform,
+): DispatchWrapperUnwrapResult {
   const token0 = argv[0]?.trim();
   if (!token0) {
     return { kind: "not-wrapper" };
@@ -423,6 +474,8 @@ export function unwrapKnownDispatchWrapperInvocation(argv: string[]): DispatchWr
       return unwrapDispatchWrapper(wrapper, unwrapNiceInvocation(argv));
     case "nohup":
       return unwrapDispatchWrapper(wrapper, unwrapNohupInvocation(argv));
+    case "script":
+      return unwrapDispatchWrapper(wrapper, unwrapScriptInvocation(argv, platform));
     case "stdbuf":
       return unwrapDispatchWrapper(wrapper, unwrapStdbufInvocation(argv));
     case "timeout":

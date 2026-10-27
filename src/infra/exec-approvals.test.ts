@@ -23,6 +23,7 @@ import {
   resolveExecApprovalsSocketPath,
   type ExecAllowlistEntry,
 } from "./exec-approvals.js";
+import { unwrapKnownDispatchWrapperInvocation } from "./exec-wrapper-resolution.js";
 
 function buildNestedEnvShellCommand(params: {
   envExecutable: string;
@@ -383,6 +384,58 @@ describe("exec approvals command resolution", () => {
     ]);
     expect(resolution?.rawExecutable).toBe("bash");
     expect(resolution?.executableName.toLowerCase()).toContain("bash");
+  });
+
+  it("blocks script wrappers that do not unwrap to a positional command", () => {
+    const resolution = resolveCommandResolutionFromArgv([
+      "/usr/bin/script",
+      "-q",
+      "-c",
+      "echo hi",
+      "/tmp/typescript",
+    ]);
+    expect(resolution?.policyBlocked).toBe(true);
+    expect(resolution?.blockedWrapper).toBe("script");
+    expect(resolution?.rawExecutable).toBe("/usr/bin/script");
+  });
+
+  it("unwraps macOS and FreeBSD script positional commands", () => {
+    expect(
+      unwrapKnownDispatchWrapperInvocation(
+        ["/usr/bin/script", "-q", "/dev/null", "bash", "-lc", "echo hi"],
+        "darwin",
+      ),
+    ).toEqual({
+      kind: "unwrapped",
+      wrapper: "script",
+      argv: ["bash", "-lc", "echo hi"],
+    });
+    expect(
+      unwrapKnownDispatchWrapperInvocation(
+        ["script", "-t", "5", "/tmp/typescript", "/bin/echo", "ok"],
+        "freebsd",
+      ),
+    ).toEqual({
+      kind: "unwrapped",
+      wrapper: "script",
+      argv: ["/bin/echo", "ok"],
+    });
+    expect(
+      unwrapKnownDispatchWrapperInvocation(
+        ["script", "-q", "/dev/null", "bash", "-lc", "echo hi"],
+        "linux",
+      ),
+    ).toEqual({ kind: "blocked", wrapper: "script" });
+    expect(unwrapKnownDispatchWrapperInvocation(["script", "-q", "/dev/null"], "darwin")).toEqual({
+      kind: "blocked",
+      wrapper: "script",
+    });
+    expect(
+      unwrapKnownDispatchWrapperInvocation(
+        ["script", "-E", "always", "/dev/null", "bash", "-lc", "echo hi"],
+        "darwin",
+      ),
+    ).toEqual({ kind: "blocked", wrapper: "script" });
   });
 });
 
