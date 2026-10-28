@@ -17,6 +17,7 @@ const DISPATCH_WRAPPER_NAMES = [
   "chrt",
   "doas",
   "env",
+  "flock",
   "ionice",
   "nice",
   "nohup",
@@ -83,7 +84,18 @@ const NICE_OPTIONS_WITH_VALUE = new Set(["-n", "--adjustment", "--priority"]);
 const STDBUF_OPTIONS_WITH_VALUE = new Set(["-i", "--input", "-o", "--output", "-e", "--error"]);
 const TIMEOUT_FLAG_OPTIONS = new Set(["--foreground", "--preserve-status", "-v", "--verbose"]);
 const TIMEOUT_OPTIONS_WITH_VALUE = new Set(["-k", "--kill-after", "-s", "--signal"]);
-const TRANSPARENT_DISPATCH_WRAPPERS = new Set(["nice", "nohup", "stdbuf", "timeout"]);
+const FLOCK_LONG_FLAG_OPTIONS = new Set([
+  "--close",
+  "--exclusive",
+  "--nb",
+  "--no-fork",
+  "--nonblock",
+  "--shared",
+  "--verbose",
+]);
+const FLOCK_LONG_OPTIONS_WITH_VALUE = new Set(["--conflict-exit-code", "--timeout", "--wait"]);
+const FLOCK_SHORT_OPTIONS_WITH_VALUE = new Set(["-E", "-w"]);
+const TRANSPARENT_DISPATCH_WRAPPERS = new Set(["flock", "nice", "nohup", "stdbuf", "timeout"]);
 
 type ShellWrapperKind = "posix" | "cmd" | "powershell";
 
@@ -366,6 +378,57 @@ function unwrapStdbufInvocation(argv: string[]): string[] | null {
   });
 }
 
+function isFlockShortFlagCluster(token: string): boolean {
+  return /^-[eFnsxo]+$/.test(token);
+}
+
+function unwrapFlockInvocation(argv: string[]): string[] | null {
+  // flock [options] <lock target> <command> [args]
+  // The first non-option token is the lock file or fd. Only the next token can be the
+  // wrapped executable. Shell-string (-c) and fd-only forms stay blocked so an
+  // existing flock allowlist entry cannot authorize a different command.
+  return scanWrapperInvocation(argv, {
+    separators: new Set(["--"]),
+    onToken: (token, lower) => {
+      if (!token.startsWith("-") || token === "-") {
+        return "stop";
+      }
+      const [lowerFlag] = lower.split("=", 2);
+      if (lowerFlag.startsWith("--")) {
+        if (FLOCK_LONG_FLAG_OPTIONS.has(lowerFlag)) {
+          return "continue";
+        }
+        if (FLOCK_LONG_OPTIONS_WITH_VALUE.has(lowerFlag)) {
+          return lower.includes("=") ? "continue" : "consume-next";
+        }
+        return "invalid";
+      }
+      // Short options are case-sensitive: -E takes a value, -e does not.
+      if (isFlockShortFlagCluster(token)) {
+        return "continue";
+      }
+      if (FLOCK_SHORT_OPTIONS_WITH_VALUE.has(token)) {
+        return "consume-next";
+      }
+      if (
+        (token.startsWith("-w") || token.startsWith("-E")) &&
+        token.length > 2 &&
+        !token.includes("=")
+      ) {
+        return "continue";
+      }
+      return "invalid";
+    },
+    adjustCommandIndex: (commandIndex, currentArgv) => {
+      const wrappedCommandIndex = commandIndex + 1;
+      const wrappedCommand = currentArgv[wrappedCommandIndex]?.trim() ?? "";
+      return wrappedCommand && (!wrappedCommand.startsWith("-") || wrappedCommand === "-")
+        ? wrappedCommandIndex
+        : null;
+    },
+  });
+}
+
 function unwrapTimeoutInvocation(argv: string[]): string[] | null {
   return unwrapDashOptionInvocation(argv, {
     onFlag: (flag, lower) => {
@@ -419,6 +482,8 @@ export function unwrapKnownDispatchWrapperInvocation(argv: string[]): DispatchWr
   switch (wrapper) {
     case "env":
       return unwrapDispatchWrapper(wrapper, unwrapEnvInvocation(argv));
+    case "flock":
+      return unwrapDispatchWrapper(wrapper, unwrapFlockInvocation(argv));
     case "nice":
       return unwrapDispatchWrapper(wrapper, unwrapNiceInvocation(argv));
     case "nohup":
