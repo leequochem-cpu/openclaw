@@ -384,6 +384,39 @@ describe("exec approvals command resolution", () => {
     expect(resolution?.rawExecutable).toBe("bash");
     expect(resolution?.executableName.toLowerCase()).toContain("bash");
   });
+
+  it("unwraps flock wrapper argv to resolve the effective executable", () => {
+    const fixture = createPathExecutableFixture();
+    const resolution = resolveCommandResolutionFromArgv(
+      [
+        "/usr/bin/flock",
+        "-nso",
+        "--timeout",
+        "1",
+        path.join(fixture.binDir, "lock"),
+        fixture.exeName,
+        "-n",
+        "needle",
+      ],
+      undefined,
+      makePathEnv(fixture.binDir),
+    );
+    expect(resolution?.resolvedPath).toBe(fixture.exePath);
+    expect(resolution?.rawExecutable).toBe(fixture.exeName);
+    expect(resolution?.policyBlocked).toBe(false);
+  });
+
+  it("blocks flock shell-string forms from allowlist auto-resolution", () => {
+    const resolution = resolveCommandResolutionFromArgv([
+      "/usr/bin/flock",
+      "/tmp/lock",
+      "-c",
+      "echo pwned",
+    ]);
+    expect(resolution?.policyBlocked).toBe(true);
+    expect(resolution?.blockedWrapper).toBe("flock");
+    expect(resolution?.rawExecutable).toBe("/usr/bin/flock");
+  });
 });
 
 describe("exec approvals shell parsing", () => {

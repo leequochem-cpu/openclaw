@@ -414,6 +414,95 @@ describe("resolveAllowAlwaysPatterns", () => {
     });
   });
 
+  it("unwraps flock and persists the inner executable instead of the wrapper", () => {
+    if (process.platform === "win32") {
+      return;
+    }
+    const dir = makeTempDir();
+    const inner = makeExecutable(dir, "inner-tool");
+    const env = makePathEnv(dir);
+    const lock = path.join(dir, "lock");
+    const safeBins = resolveSafeBins(undefined);
+    const first = evaluateShellAllowlist({
+      command: `/usr/bin/flock -nso -w 1 --timeout=1 ${lock} ${inner} ok`,
+      allowlist: [],
+      safeBins,
+      cwd: dir,
+      env,
+      platform: process.platform,
+    });
+    const persisted = resolveAllowAlwaysPatterns({
+      segments: first.segments,
+      cwd: dir,
+      env,
+      platform: process.platform,
+    });
+    expect(persisted).toEqual([inner]);
+    expect(persisted).not.toContain("/usr/bin/flock");
+  });
+
+  it("prevents allow-always bypass for flock wrappers", () => {
+    if (process.platform === "win32") {
+      return;
+    }
+    const dir = makeTempDir();
+    const echo = makeExecutable(dir, "echo");
+    makeExecutable(dir, "id");
+    const env = makePathEnv(dir);
+    const lock = path.join(dir, "lock");
+    expectAllowAlwaysBypassBlocked({
+      dir,
+      firstCommand: `/usr/bin/flock ${lock} /bin/zsh -lc 'echo warmup-ok'`,
+      secondCommand: `/usr/bin/flock ${lock} /bin/zsh -lc 'id > marker'`,
+      env,
+      persistedPattern: echo,
+    });
+  });
+
+  it("fails closed for flock shell-string, unlock, and fd-only forms", () => {
+    if (process.platform === "win32") {
+      return;
+    }
+    const dir = makeTempDir();
+    const lock = path.join(dir, "lock");
+    const safeBins = resolveSafeBins(undefined);
+    const commands = [
+      `/usr/bin/flock ${lock} -c 'echo pwned'`,
+      `/usr/bin/flock -n ${lock} -c 'echo pwned'`,
+      `/usr/bin/flock --unlock ${lock} /bin/echo pwned`,
+      `/usr/bin/flock -u ${lock} /bin/echo pwned`,
+      `/usr/bin/flock 9`,
+    ];
+    for (const command of commands) {
+      const evaluated = evaluateShellAllowlist({
+        command,
+        allowlist: [{ pattern: "/usr/bin/flock" }],
+        safeBins,
+        cwd: dir,
+        platform: process.platform,
+      });
+      expect(evaluated.allowlistSatisfied, command).toBe(false);
+      expect(evaluated.segments[0]?.resolution?.policyBlocked, command).toBe(true);
+      expect(
+        resolveAllowAlwaysPatterns({
+          segments: evaluated.segments,
+          cwd: dir,
+          platform: process.platform,
+        }),
+        command,
+      ).toEqual([]);
+      expect(
+        requiresExecApproval({
+          ask: "on-miss",
+          security: "allowlist",
+          analysisOk: evaluated.analysisOk,
+          allowlistSatisfied: evaluated.allowlistSatisfied,
+        }),
+        command,
+      ).toBe(true);
+    }
+  });
+
   it("prevents allow-always bypass for dispatch-wrapper + shell-wrapper chains", () => {
     if (process.platform === "win32") {
       return;
