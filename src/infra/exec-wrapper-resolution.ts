@@ -18,13 +18,21 @@ const DISPATCH_WRAPPER_NAMES = [
   "doas",
   "env",
   "ionice",
+  "linux32",
+  "linux64",
   "nice",
   "nohup",
+  "nsenter",
+  "setarch",
+  "setpriv",
   "setsid",
   "stdbuf",
   "sudo",
   "taskset",
   "timeout",
+  "unshare",
+  "watch",
+  "xvfb-run",
 ] as const;
 
 function withWindowsExeAliases(names: readonly string[]): string[] {
@@ -430,9 +438,19 @@ export function unwrapKnownDispatchWrapperInvocation(argv: string[]): DispatchWr
     case "chrt":
     case "doas":
     case "ionice":
+    case "linux32":
+    case "linux64":
+    case "nsenter":
+    case "setarch":
+    case "setpriv":
     case "setsid":
     case "sudo":
     case "taskset":
+    case "unshare":
+    case "watch":
+    case "xvfb-run":
+      // Option-heavy carriers run a caller-supplied command. Persisting the
+      // carrier path would approve a later, different inner command.
       return blockDispatchWrapper(wrapper);
     default:
       return { kind: "not-wrapper" };

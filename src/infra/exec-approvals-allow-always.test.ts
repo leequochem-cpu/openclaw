@@ -378,6 +378,94 @@ describe("resolveAllowAlwaysPatterns", () => {
     expect(patterns).toEqual([]);
   });
 
+  it("fails closed for namespace and personality carriers", () => {
+    if (process.platform === "win32") {
+      return;
+    }
+    const carriers = [
+      {
+        name: "unshare",
+        first: "/usr/bin/unshare echo warmup-ok",
+        second: "/usr/bin/unshare --user bash -lc 'id > /tmp/pwned'",
+      },
+      {
+        name: "setarch",
+        first: "/usr/bin/setarch x86_64 echo warmup-ok",
+        second: "/usr/bin/setarch x86_64 bash -lc 'id > /tmp/pwned'",
+      },
+      {
+        name: "linux64",
+        first: "/usr/bin/linux64 echo warmup-ok",
+        second: "/usr/bin/linux64 bash -lc 'id > /tmp/pwned'",
+      },
+      {
+        name: "linux32",
+        first: "/usr/bin/linux32 echo warmup-ok",
+        second: "/usr/bin/linux32 bash -lc 'id > /tmp/pwned'",
+      },
+      {
+        name: "setpriv",
+        first: "/usr/bin/setpriv --inh-caps -all echo warmup-ok",
+        second: "/usr/bin/setpriv --inh-caps -all bash -lc 'id > /tmp/pwned'",
+      },
+      {
+        name: "nsenter",
+        first: "/usr/bin/nsenter -t 1 echo warmup-ok",
+        second: "/usr/bin/nsenter -t 1 bash -lc 'id > /tmp/pwned'",
+      },
+      {
+        name: "watch",
+        first: "/usr/bin/watch -n 1 echo warmup-ok",
+        second: "/usr/bin/watch -n 1 bash -lc 'id > /tmp/pwned'",
+      },
+      {
+        name: "xvfb-run",
+        first: "/usr/bin/xvfb-run -a echo warmup-ok",
+        second: "/usr/bin/xvfb-run -a bash -lc 'id > /tmp/pwned'",
+      },
+    ] as const;
+
+    for (const carrier of carriers) {
+      const exe = `/usr/bin/${carrier.name}`;
+      const safeBins = resolveSafeBins(undefined);
+      const first = evaluateShellAllowlist({
+        command: carrier.first,
+        allowlist: [],
+        safeBins,
+        cwd: "/tmp",
+        platform: process.platform,
+      });
+      expect(first.analysisOk, carrier.name).toBe(true);
+      const persisted = resolveAllowAlwaysPatterns({
+        segments: first.segments,
+        cwd: "/tmp",
+        platform: process.platform,
+      });
+      expect(persisted, carrier.name).toEqual([]);
+
+      const second = evaluateShellAllowlist({
+        command: carrier.second,
+        allowlist: [{ pattern: exe }],
+        safeBins,
+        cwd: "/tmp",
+        platform: process.platform,
+      });
+      expect(second.analysisOk, carrier.name).toBe(true);
+      expect(second.segments[0]?.resolution?.policyBlocked, carrier.name).toBe(true);
+      expect(second.segments[0]?.resolution?.blockedWrapper, carrier.name).toBe(carrier.name);
+      expect(second.allowlistSatisfied, carrier.name).toBe(false);
+      expect(
+        requiresExecApproval({
+          ask: "on-miss",
+          security: "allowlist",
+          analysisOk: second.analysisOk,
+          allowlistSatisfied: second.allowlistSatisfied,
+        }),
+        carrier.name,
+      ).toBe(true);
+    }
+  });
+
   it("fails closed for unresolved dispatch wrappers", () => {
     const patterns = resolveAllowAlwaysPatterns({
       segments: [
