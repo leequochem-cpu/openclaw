@@ -374,6 +374,25 @@ describe("exec approvals command resolution", () => {
     expect(resolution?.executableName.toLowerCase()).toContain("bash");
   });
 
+  it("fails closed for unshare even when the carrier path is allowlisted", () => {
+    const analysis = analyzeArgvCommand({
+      argv: ["/usr/bin/unshare", "--user", "bash", "-lc", "id > /tmp/pwned"],
+    });
+    const allowlistEval = evaluateExecAllowlist({
+      analysis,
+      allowlist: [{ pattern: "/usr/bin/unshare" }],
+      safeBins: normalizeSafeBins([]),
+      cwd: "/tmp",
+      platform: process.platform,
+    });
+
+    expect(analysis.ok).toBe(true);
+    expect(analysis.segments[0]?.resolution?.policyBlocked).toBe(true);
+    expect(analysis.segments[0]?.resolution?.blockedWrapper).toBe("unshare");
+    expect(allowlistEval.allowlistSatisfied).toBe(false);
+    expect(allowlistEval.segmentSatisfiedBy).toEqual([null]);
+  });
+
   it("unwraps nice wrapper argv to resolve the effective executable", () => {
     const resolution = resolveCommandResolutionFromArgv([
       "/usr/bin/nice",
