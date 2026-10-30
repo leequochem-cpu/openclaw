@@ -374,6 +374,25 @@ describe("exec approvals command resolution", () => {
     expect(resolution?.executableName.toLowerCase()).toContain("bash");
   });
 
+  it("fails closed for prlimit even when the carrier path is allowlisted", () => {
+    const analysis = analyzeArgvCommand({
+      argv: ["/usr/bin/prlimit", "--nofile=1024", "bash", "-lc", "id > /tmp/pwned"],
+    });
+    const allowlistEval = evaluateExecAllowlist({
+      analysis,
+      allowlist: [{ pattern: "/usr/bin/prlimit" }],
+      safeBins: normalizeSafeBins([]),
+      cwd: "/tmp",
+      platform: process.platform,
+    });
+
+    expect(analysis.ok).toBe(true);
+    expect(analysis.segments[0]?.resolution?.policyBlocked).toBe(true);
+    expect(analysis.segments[0]?.resolution?.blockedWrapper).toBe("prlimit");
+    expect(allowlistEval.allowlistSatisfied).toBe(false);
+    expect(allowlistEval.segmentSatisfiedBy).toEqual([null]);
+  });
+
   it("unwraps nice wrapper argv to resolve the effective executable", () => {
     const resolution = resolveCommandResolutionFromArgv([
       "/usr/bin/nice",

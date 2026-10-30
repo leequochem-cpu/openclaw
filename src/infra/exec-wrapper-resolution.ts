@@ -14,13 +14,22 @@ const WINDOWS_CMD_WRAPPER_NAMES = ["cmd"] as const;
 const POWERSHELL_WRAPPER_NAMES = ["powershell", "pwsh"] as const;
 const SHELL_MULTIPLEXER_WRAPPER_NAMES = ["busybox", "toybox"] as const;
 const DISPATCH_WRAPPER_NAMES = [
+  "capsh",
+  "choom",
   "chrt",
+  "dbus-run-session",
   "doas",
   "env",
   "ionice",
+  "ld.so",
   "nice",
   "nohup",
+  "prlimit",
+  "run-parts",
   "setsid",
+  "sg",
+  "ssh-agent",
+  "start-stop-daemon",
   "stdbuf",
   "sudo",
   "taskset",
@@ -118,8 +127,14 @@ export function normalizeExecutableToken(token: string): string {
   return stripWindowsExeSuffix(basenameLower(token));
 }
 
+function isNormalizedDynamicLinker(name: string): boolean {
+  // glibc names the real interpreter `ld-linux*.so*`. `ld.so` is the symlink.
+  return name === "ld.so" || name.startsWith("ld-linux");
+}
+
 export function isDispatchWrapperExecutable(token: string): boolean {
-  return DISPATCH_WRAPPER_CANONICAL.has(normalizeExecutableToken(token));
+  const name = normalizeExecutableToken(token);
+  return DISPATCH_WRAPPER_CANONICAL.has(name) || isNormalizedDynamicLinker(name);
 }
 
 export function isShellWrapperExecutable(token: string): boolean {
@@ -416,6 +431,11 @@ export function unwrapKnownDispatchWrapperInvocation(argv: string[]): DispatchWr
     return { kind: "not-wrapper" };
   }
   const wrapper = normalizeExecutableToken(token0);
+  if (isNormalizedDynamicLinker(wrapper)) {
+    // The loader's next argument is an arbitrary program. Persisting the
+    // loader path would approve a later, different program.
+    return blockDispatchWrapper(wrapper);
+  }
   switch (wrapper) {
     case "env":
       return unwrapDispatchWrapper(wrapper, unwrapEnvInvocation(argv));
@@ -427,12 +447,22 @@ export function unwrapKnownDispatchWrapperInvocation(argv: string[]): DispatchWr
       return unwrapDispatchWrapper(wrapper, unwrapStdbufInvocation(argv));
     case "timeout":
       return unwrapDispatchWrapper(wrapper, unwrapTimeoutInvocation(argv));
+    case "capsh":
+    case "choom":
     case "chrt":
+    case "dbus-run-session":
     case "doas":
     case "ionice":
+    case "prlimit":
+    case "run-parts":
     case "setsid":
+    case "sg":
+    case "ssh-agent":
+    case "start-stop-daemon":
     case "sudo":
     case "taskset":
+      // These carriers execute a caller-supplied command. Persisting the
+      // carrier path would approve a later, different inner command.
       return blockDispatchWrapper(wrapper);
     default:
       return { kind: "not-wrapper" };

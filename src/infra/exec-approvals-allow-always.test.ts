@@ -378,6 +378,142 @@ describe("resolveAllowAlwaysPatterns", () => {
     expect(patterns).toEqual([]);
   });
 
+  it("fails closed for command carriers that execute an inner command", () => {
+    if (process.platform === "win32") {
+      return;
+    }
+    const carriers = [
+      {
+        name: "prlimit",
+        exe: "/usr/bin/prlimit",
+        first: "/usr/bin/prlimit --nofile=1024 echo warmup-ok",
+        second: "/usr/bin/prlimit --nofile=1024 bash -lc 'id > /tmp/pwned'",
+      },
+      {
+        name: "choom",
+        exe: "/usr/bin/choom",
+        first: "/usr/bin/choom -n 0 echo warmup-ok",
+        second: "/usr/bin/choom -n 0 bash -lc 'id > /tmp/pwned'",
+      },
+      {
+        name: "capsh",
+        exe: "/usr/sbin/capsh",
+        first: "/usr/sbin/capsh -- -c 'echo warmup-ok'",
+        second: "/usr/sbin/capsh -- -c 'id > /tmp/pwned'",
+      },
+      {
+        name: "dbus-run-session",
+        exe: "/usr/bin/dbus-run-session",
+        first: "/usr/bin/dbus-run-session -- echo warmup-ok",
+        second: "/usr/bin/dbus-run-session -- bash -lc 'id > /tmp/pwned'",
+      },
+      {
+        name: "ssh-agent",
+        exe: "/usr/bin/ssh-agent",
+        first: "/usr/bin/ssh-agent echo warmup-ok",
+        second: "/usr/bin/ssh-agent bash -lc 'id > /tmp/pwned'",
+      },
+      {
+        name: "sg",
+        exe: "/usr/bin/sg",
+        first: "/usr/bin/sg users -c 'echo warmup-ok'",
+        second: "/usr/bin/sg users -c 'id > /tmp/pwned'",
+      },
+      {
+        name: "start-stop-daemon",
+        exe: "/usr/sbin/start-stop-daemon",
+        first: "/usr/sbin/start-stop-daemon --start --exec /usr/bin/echo -- warmup-ok",
+        second: "/usr/sbin/start-stop-daemon --start --exec /bin/bash -- -lc 'id > /tmp/pwned'",
+      },
+      {
+        name: "run-parts",
+        exe: "/usr/bin/run-parts",
+        first: "/usr/bin/run-parts /etc/cron.daily",
+        second: "/usr/bin/run-parts /tmp/pwned-scripts",
+      },
+      {
+        name: "ld.so",
+        exe: "/usr/bin/ld.so",
+        first: "/usr/bin/ld.so /usr/bin/echo warmup-ok",
+        second: "/usr/bin/ld.so /bin/bash -lc 'id > /tmp/pwned'",
+      },
+    ] as const;
+
+    for (const carrier of carriers) {
+      const safeBins = resolveSafeBins(undefined);
+      const first = evaluateShellAllowlist({
+        command: carrier.first,
+        allowlist: [],
+        safeBins,
+        cwd: "/tmp",
+        platform: process.platform,
+      });
+      expect(first.analysisOk, carrier.name).toBe(true);
+      const persisted = resolveAllowAlwaysPatterns({
+        segments: first.segments,
+        cwd: "/tmp",
+        platform: process.platform,
+      });
+      expect(persisted, carrier.name).toEqual([]);
+
+      const second = evaluateShellAllowlist({
+        command: carrier.second,
+        allowlist: [{ pattern: carrier.exe }],
+        safeBins,
+        cwd: "/tmp",
+        platform: process.platform,
+      });
+      expect(second.analysisOk, carrier.name).toBe(true);
+      expect(second.segments[0]?.resolution?.policyBlocked, carrier.name).toBe(true);
+      expect(second.segments[0]?.resolution?.blockedWrapper, carrier.name).toBe(carrier.name);
+      expect(second.allowlistSatisfied, carrier.name).toBe(false);
+      expect(
+        requiresExecApproval({
+          ask: "on-miss",
+          security: "allowlist",
+          analysisOk: second.analysisOk,
+          allowlistSatisfied: second.allowlistSatisfied,
+        }),
+        carrier.name,
+      ).toBe(true);
+    }
+  });
+
+  it("fails closed for the glibc dynamic linker real path", () => {
+    if (process.platform === "win32") {
+      return;
+    }
+    const linker = "/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2";
+    const safeBins = resolveSafeBins(undefined);
+    const first = evaluateShellAllowlist({
+      command: `${linker} /usr/bin/echo warmup-ok`,
+      allowlist: [],
+      safeBins,
+      cwd: "/tmp",
+      platform: process.platform,
+    });
+    expect(first.analysisOk).toBe(true);
+    expect(
+      resolveAllowAlwaysPatterns({
+        segments: first.segments,
+        cwd: "/tmp",
+        platform: process.platform,
+      }),
+    ).toEqual([]);
+
+    const second = evaluateShellAllowlist({
+      command: `${linker} /bin/bash -lc 'id > /tmp/pwned'`,
+      allowlist: [{ pattern: linker }],
+      safeBins,
+      cwd: "/tmp",
+      platform: process.platform,
+    });
+    expect(second.analysisOk).toBe(true);
+    expect(second.segments[0]?.resolution?.policyBlocked).toBe(true);
+    expect(second.segments[0]?.resolution?.blockedWrapper).toBe("ld-linux-x86-64.so.2");
+    expect(second.allowlistSatisfied).toBe(false);
+  });
+
   it("fails closed for unresolved dispatch wrappers", () => {
     const patterns = resolveAllowAlwaysPatterns({
       segments: [
