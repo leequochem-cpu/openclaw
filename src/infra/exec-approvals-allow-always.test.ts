@@ -378,6 +378,58 @@ describe("resolveAllowAlwaysPatterns", () => {
     expect(patterns).toEqual([]);
   });
 
+  it("does not let allow-always reuse a newgrp stdin shell", () => {
+    if (process.platform === "win32") {
+      return;
+    }
+    const dir = makeTempDir();
+    const printfBin = makeExecutable(dir, "printf");
+    const newgrp = makeExecutable(dir, "newgrp");
+    const env = makePathEnv(dir);
+    const safeBins = resolveSafeBins(undefined);
+
+    const first = evaluateShellAllowlist({
+      command: "printf true | newgrp ubuntu",
+      allowlist: [],
+      safeBins,
+      cwd: dir,
+      env,
+      platform: process.platform,
+    });
+    expect(first.analysisOk).toBe(true);
+    expect(first.segments.some((segment) => segment.resolution?.blockedWrapper === "newgrp")).toBe(
+      true,
+    );
+
+    const persisted = resolveAllowAlwaysPatterns({
+      segments: first.segments,
+      cwd: dir,
+      env,
+      platform: process.platform,
+    });
+    expect(persisted).toEqual([printfBin]);
+    expect(persisted).not.toContain(newgrp);
+
+    const second = evaluateShellAllowlist({
+      command: "printf pwned | newgrp ubuntu",
+      allowlist: [{ pattern: printfBin }, { pattern: newgrp }],
+      safeBins,
+      cwd: dir,
+      env,
+      platform: process.platform,
+    });
+    expect(second.analysisOk).toBe(true);
+    expect(second.allowlistSatisfied).toBe(false);
+    expect(
+      requiresExecApproval({
+        ask: "on-miss",
+        security: "allowlist",
+        analysisOk: second.analysisOk,
+        allowlistSatisfied: second.allowlistSatisfied,
+      }),
+    ).toBe(true);
+  });
+
   it("fails closed for unresolved dispatch wrappers", () => {
     const patterns = resolveAllowAlwaysPatterns({
       segments: [

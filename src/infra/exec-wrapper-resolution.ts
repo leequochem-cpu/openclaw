@@ -18,6 +18,7 @@ const DISPATCH_WRAPPER_NAMES = [
   "doas",
   "env",
   "ionice",
+  "newgrp",
   "nice",
   "nohup",
   "setsid",
@@ -430,6 +431,7 @@ export function unwrapKnownDispatchWrapperInvocation(argv: string[]): DispatchWr
     case "chrt":
     case "doas":
     case "ionice":
+    case "newgrp":
     case "setsid":
     case "sudo":
     case "taskset":

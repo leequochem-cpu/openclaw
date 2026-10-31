@@ -188,6 +188,8 @@ For allow-always decisions in allowlist mode, known dispatch wrappers
 paths. Shell multiplexers (`busybox`, `toybox`) are also unwrapped for shell applets (`sh`, `ash`,
 etc.) so inner executables are persisted instead of multiplexer binaries. If a wrapper or
 multiplexer cannot be safely unwrapped, no allowlist entry is persisted automatically.
+`newgrp` is one of those carriers: it starts a shell that reads commands from stdin, so
+allow-always does not persist its path.
 
 Default safe bins: `jq`, `cut`, `uniq`, `head`, `tail`, `tr`, `wc`.
 
