@@ -29,6 +29,10 @@ describe("system run command helpers", () => {
     expect(extractShellCommandFromArgv(["/bin/sh", "-lc", "echo hi"])).toBe("echo hi");
   });
 
+  test("extractShellCommandFromArgv extracts rbash -lc command", () => {
+    expect(extractShellCommandFromArgv(["/bin/rbash", "-lc", "echo hi"])).toBe("echo hi");
+  });
+
   test("extractShellCommandFromArgv extracts cmd.exe /c command", () => {
     expect(extractShellCommandFromArgv(["cmd.exe", "/d", "/s", "/c", "echo hi"])).toBe("echo hi");
   });
@@ -111,6 +115,10 @@ describe("system run command helpers", () => {
   test("validateSystemRunCommandConsistency rejects shell-only rawCommand for positional-argv carrier wrappers", () => {
     expectRawCommandMismatch({
       argv: ["/bin/sh", "-lc", '$0 "$1"', "/usr/bin/touch", "/tmp/marker"],
+      rawCommand: '$0 "$1"',
+    });
+    expectRawCommandMismatch({
+      argv: ["/bin/rbash", "-lc", '$0 "$1"', "/usr/bin/touch", "/tmp/marker"],
       rawCommand: '$0 "$1"',
     });
   });

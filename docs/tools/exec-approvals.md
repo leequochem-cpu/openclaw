@@ -188,6 +188,9 @@ For allow-always decisions in allowlist mode, known dispatch wrappers
 paths. Shell multiplexers (`busybox`, `toybox`) are also unwrapped for shell applets (`sh`, `ash`,
 etc.) so inner executables are persisted instead of multiplexer binaries. If a wrapper or
 multiplexer cannot be safely unwrapped, no allowlist entry is persisted automatically.
+`rbash` is a shell wrapper, so allow-always persists the inner executable instead of the
+`rbash` binary. `scriptlive`, `x86_64`, and `i386` are unsafe carriers: allow-always persists
+nothing for them, and an existing path entry does not authorize a later invocation.
 
 Default safe bins: `jq`, `cut`, `uniq`, `head`, `tail`, `tr`, `wc`.
 

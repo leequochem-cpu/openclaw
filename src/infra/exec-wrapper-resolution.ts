@@ -9,7 +9,16 @@ export const MAX_DISPATCH_WRAPPER_DEPTH = 4;
 
 const WINDOWS_EXE_SUFFIX = ".exe";
 
-const POSIX_SHELL_WRAPPER_NAMES = ["ash", "bash", "dash", "fish", "ksh", "sh", "zsh"] as const;
+const POSIX_SHELL_WRAPPER_NAMES = [
+  "ash",
+  "bash",
+  "dash",
+  "fish",
+  "ksh",
+  "rbash",
+  "sh",
+  "zsh",
+] as const;
 const WINDOWS_CMD_WRAPPER_NAMES = ["cmd"] as const;
 const POWERSHELL_WRAPPER_NAMES = ["powershell", "pwsh"] as const;
 const SHELL_MULTIPLEXER_WRAPPER_NAMES = ["busybox", "toybox"] as const;
@@ -17,14 +26,17 @@ const DISPATCH_WRAPPER_NAMES = [
   "chrt",
   "doas",
   "env",
+  "i386",
   "ionice",
   "nice",
   "nohup",
+  "scriptlive",
   "setsid",
   "stdbuf",
   "sudo",
   "taskset",
   "timeout",
+  "x86_64",
 ] as const;
 
 function withWindowsExeAliases(names: readonly string[]): string[] {
@@ -429,10 +441,13 @@ export function unwrapKnownDispatchWrapperInvocation(argv: string[]): DispatchWr
       return unwrapDispatchWrapper(wrapper, unwrapTimeoutInvocation(argv));
     case "chrt":
     case "doas":
+    case "i386":
     case "ionice":
+    case "scriptlive":
     case "setsid":
     case "sudo":
     case "taskset":
+    case "x86_64":
       return blockDispatchWrapper(wrapper);
     default:
       return { kind: "not-wrapper" };
