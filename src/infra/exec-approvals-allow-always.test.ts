@@ -378,6 +378,83 @@ describe("resolveAllowAlwaysPatterns", () => {
     expect(patterns).toEqual([]);
   });
 
+  it("does not let allow-always reuse scriptlive or setarch personality applets", () => {
+    if (process.platform === "win32") {
+      return;
+    }
+    const dir = makeTempDir();
+    const env = makePathEnv(dir);
+    const safeBins = resolveSafeBins(undefined);
+    const carriers = [
+      { name: "scriptlive", argvTail: "-c 'echo warmup-ok' -t /dev/null /dev/null" },
+      { name: "x86_64", argvTail: "echo warmup-ok" },
+      { name: "i386", argvTail: "echo warmup-ok" },
+    ] as const;
+
+    for (const carrier of carriers) {
+      const carrierPath = makeExecutable(dir, carrier.name);
+      const first = evaluateShellAllowlist({
+        command: `${carrierPath} ${carrier.argvTail}`,
+        allowlist: [],
+        safeBins,
+        cwd: dir,
+        env,
+        platform: process.platform,
+      });
+      expect(first.analysisOk, carrier.name).toBe(true);
+      expect(first.segments[0]?.resolution?.policyBlocked, carrier.name).toBe(true);
+      expect(first.segments[0]?.resolution?.blockedWrapper, carrier.name).toBe(carrier.name);
+
+      const persisted = resolveAllowAlwaysPatterns({
+        segments: first.segments,
+        cwd: dir,
+        env,
+        platform: process.platform,
+      });
+      expect(persisted, carrier.name).toEqual([]);
+
+      const secondTail =
+        carrier.name === "scriptlive" ? "-c 'id -u' -t /dev/null /dev/null" : "id -u";
+      const second = evaluateShellAllowlist({
+        command: `${carrierPath} ${secondTail}`,
+        allowlist: [{ pattern: carrierPath }],
+        safeBins,
+        cwd: dir,
+        env,
+        platform: process.platform,
+      });
+      expect(second.analysisOk, carrier.name).toBe(true);
+      expect(second.allowlistSatisfied, carrier.name).toBe(false);
+      expect(
+        requiresExecApproval({
+          ask: "on-miss",
+          security: "allowlist",
+          analysisOk: second.analysisOk,
+          allowlistSatisfied: second.allowlistSatisfied,
+        }),
+        carrier.name,
+      ).toBe(true);
+    }
+  });
+
+  it("persists the inner executable for rbash instead of the shell binary", () => {
+    if (process.platform === "win32") {
+      return;
+    }
+    const dir = makeTempDir();
+    const rbash = makeExecutable(dir, "rbash");
+    const echo = makeExecutable(dir, "echo");
+    makeExecutable(dir, "id");
+    const env = makePathEnv(dir);
+    expectAllowAlwaysBypassBlocked({
+      dir,
+      firstCommand: `${rbash} -lc 'echo warmup-ok'`,
+      secondCommand: `${rbash} -lc 'id > marker'`,
+      env,
+      persistedPattern: echo,
+    });
+  });
+
   it("fails closed for unresolved dispatch wrappers", () => {
     const patterns = resolveAllowAlwaysPatterns({
       segments: [

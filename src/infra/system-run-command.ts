@@ -64,6 +64,7 @@ const POSIX_OR_POWERSHELL_INLINE_WRAPPER_NAMES = new Set([
   "ksh",
   "powershell",
   "pwsh",
+  "rbash",
   "sh",
   "zsh",
 ]);
