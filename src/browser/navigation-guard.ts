@@ -75,6 +75,42 @@ export async function assertBrowserNavigationAllowed(
 }
 
 /**
+ * Re-check the live tab URL before browser reads or actions.
+ *
+ * Direct `/navigate` is already guarded. Act clicks, form submits, and page
+ * redirects can move that tab afterward. Trusted-network mode still allows
+ * private HTTP(S) pages. Strict mode reuses the post-navigation guard so a
+ * later snapshot, screenshot, evaluate, or other act cannot read or drive a
+ * private page the click just opened.
+ */
+export async function assertCurrentBrowserTabNavigationAllowed(
+  opts: {
+    url: string;
+    lookupFn?: LookupFn;
+  } & BrowserNavigationPolicyOptions,
+): Promise<void> {
+  const rawUrl = String(opts.url ?? "").trim();
+  if (!rawUrl) {
+    return;
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    return;
+  }
+
+  const privateNetworkAllowed =
+    opts.ssrfPolicy === undefined || isPrivateNetworkAllowedByPolicy(opts.ssrfPolicy);
+  if (privateNetworkAllowed && NETWORK_NAVIGATION_PROTOCOLS.has(parsed.protocol)) {
+    return;
+  }
+
+  await assertBrowserNavigationResultAllowed(opts);
+}
+
+/**
  * Best-effort post-navigation guard for final page URLs.
  * Only validates network URLs (http/https) and about:blank to avoid false
  * positives on browser-internal error pages (e.g. chrome-error://).

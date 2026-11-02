@@ -1,3 +1,4 @@
+import { assertCurrentBrowserTabNavigationAllowed } from "../navigation-guard.js";
 import type { PwAiModule } from "../pw-ai-module.js";
 import { getPwAiModule as getPwAiModuleBase } from "../pw-ai-module.js";
 import type { BrowserRouteContext, ProfileContext } from "../server-context.js";
@@ -92,6 +93,11 @@ type RouteWithTabParams<T> = {
   res: BrowserResponse;
   ctx: BrowserRouteContext;
   targetId?: string;
+  /**
+   * `/navigate` checks the destination itself and must still be able to leave
+   * a page that strict mode would now reject.
+   */
+  skipCurrentUrlGuard?: boolean;
   run: (ctx: RouteTabContext) => Promise<T>;
 };
 
@@ -104,6 +110,12 @@ export async function withRouteTabContext<T>(
   }
   try {
     const tab = await profileCtx.ensureTabAvailable(params.targetId);
+    if (!params.skipCurrentUrlGuard) {
+      await assertCurrentBrowserTabNavigationAllowed({
+        url: tab.url,
+        ssrfPolicy: params.ctx.state().resolved.ssrfPolicy,
+      });
+    }
     return await params.run({
       profileCtx,
       tab,
@@ -121,6 +133,7 @@ type RouteWithPwParams<T> = {
   ctx: BrowserRouteContext;
   targetId?: string;
   feature: string;
+  skipCurrentUrlGuard?: boolean;
   run: (ctx: RouteTabPwContext) => Promise<T>;
 };
 
@@ -132,6 +145,7 @@ export async function withPlaywrightRouteContext<T>(
     res: params.res,
     ctx: params.ctx,
     targetId: params.targetId,
+    skipCurrentUrlGuard: params.skipCurrentUrlGuard,
     run: async ({ profileCtx, tab, cdpUrl }) => {
       const pw = await requirePwAi(params.res, params.feature);
       if (!pw) {
