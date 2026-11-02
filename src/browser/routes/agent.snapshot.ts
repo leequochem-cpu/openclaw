@@ -6,7 +6,10 @@ import {
   DEFAULT_AI_SNAPSHOT_EFFICIENT_MAX_CHARS,
   DEFAULT_AI_SNAPSHOT_MAX_CHARS,
 } from "../constants.js";
-import { withBrowserNavigationPolicy } from "../navigation-guard.js";
+import {
+  assertCurrentBrowserTabNavigationAllowed,
+  withBrowserNavigationPolicy,
+} from "../navigation-guard.js";
 import {
   DEFAULT_BROWSER_SCREENSHOT_MAX_BYTES,
   DEFAULT_BROWSER_SCREENSHOT_MAX_SIDE,
@@ -100,6 +103,7 @@ export function registerBrowserAgentSnapshotRoutes(
       ctx,
       targetId,
       feature: "navigate",
+      skipCurrentUrlGuard: true,
       run: async ({ cdpUrl, tab, pw, profileCtx }) => {
         const result = await pw.navigateViaPlaywright({
           cdpUrl,
@@ -251,6 +255,10 @@ export function registerBrowserAgentSnapshotRoutes(
 
     try {
       const tab = await profileCtx.ensureTabAvailable(targetId || undefined);
+      await assertCurrentBrowserTabNavigationAllowed({
+        url: tab.url,
+        ssrfPolicy: ctx.state().resolved.ssrfPolicy,
+      });
       if ((labels || mode === "efficient") && format === "aria") {
         return jsonError(res, 400, "labels/mode=efficient require format=ai");
       }

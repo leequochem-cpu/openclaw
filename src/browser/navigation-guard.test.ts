@@ -3,6 +3,7 @@ import { SsrFBlockedError, type LookupFn } from "../infra/net/ssrf.js";
 import {
   assertBrowserNavigationAllowed,
   assertBrowserNavigationResultAllowed,
+  assertCurrentBrowserTabNavigationAllowed,
   InvalidBrowserNavigationUrlError,
 } from "./navigation-guard.js";
 
@@ -144,6 +145,41 @@ describe("browser navigation guard", () => {
     await expect(
       assertBrowserNavigationResultAllowed({
         url: "chrome-error://chromewebdata/",
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("blocks the live tab when strict mode follows an act navigation to loopback", async () => {
+    await expect(
+      assertCurrentBrowserTabNavigationAllowed({
+        url: "http://127.0.0.1:8080/secret",
+        ssrfPolicy: { allowPrivateNetwork: false },
+      }),
+    ).rejects.toBeInstanceOf(SsrFBlockedError);
+  });
+
+  it("does not re-check loopback tabs when no strict policy is configured", async () => {
+    await expect(
+      assertCurrentBrowserTabNavigationAllowed({
+        url: "http://127.0.0.1:8080/secret",
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("keeps loopback tabs readable in trusted-network mode", async () => {
+    await expect(
+      assertCurrentBrowserTabNavigationAllowed({
+        url: "http://127.0.0.1:8080/secret",
+        ssrfPolicy: { dangerouslyAllowPrivateNetwork: true },
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("still allows a public tab in strict mode", async () => {
+    await expect(
+      assertCurrentBrowserTabNavigationAllowed({
+        url: "http://93.184.216.34/",
+        ssrfPolicy: {},
       }),
     ).resolves.toBeUndefined();
   });
