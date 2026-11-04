@@ -83,6 +83,7 @@ import { applyGatewayLaneConcurrency } from "./server-lanes.js";
 import { startGatewayMaintenanceTimers } from "./server-maintenance.js";
 import { GATEWAY_EVENTS, listGatewayMethods } from "./server-methods-list.js";
 import { coreGatewayHandlers } from "./server-methods.js";
+import { disconnectClientsForDevice } from "./server-methods/device-session-disconnect.js";
 import { createExecApprovalHandlers } from "./server-methods/exec-approval.js";
 import { safeParseJson } from "./server-methods/nodes.helpers.js";
 import { createSecretsHandlers } from "./server-methods/secrets.js";
@@ -831,6 +832,9 @@ export async function startGatewayServer(
         }
       }
       return false;
+    },
+    disconnectClientsForDevice: (deviceId, opts) => {
+      disconnectClientsForDevice(clients, deviceId, opts);
     },
     nodeRegistry,
     agentRunSeq,
