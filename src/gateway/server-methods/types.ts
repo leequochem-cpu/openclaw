@@ -51,6 +51,7 @@ export type GatewayRequestContext = {
   nodeUnsubscribeAll: (nodeId: string) => void;
   hasConnectedMobileNode: () => boolean;
   hasExecApprovalClients?: () => boolean;
+  disconnectClientsForDevice?: (deviceId: string, opts?: { role?: string }) => void;
   nodeRegistry: NodeRegistry;
   agentRunSeq: Map<string, number>;
   chatAbortControllers: Map<string, ChatAbortControllerEntry>;
