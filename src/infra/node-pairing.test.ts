@@ -69,6 +69,99 @@ describe("node pairing tokens", () => {
     });
   });
 
+  test("requires operator.admin to approve system.run node commands", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "openclaw-node-pairing-"));
+    const request = await requestNodePairing(
+      {
+        nodeId: "node-1",
+        platform: "darwin",
+        commands: ["system.run"],
+      },
+      baseDir,
+    );
+
+    await expect(
+      approveNodePairing(
+        request.request.requestId,
+        { callerScopes: ["operator.pairing"] },
+        baseDir,
+      ),
+    ).resolves.toEqual({
+      status: "forbidden",
+      missingScope: "operator.admin",
+    });
+    await expect(
+      approveNodePairing(request.request.requestId, { callerScopes: ["operator.write"] }, baseDir),
+    ).resolves.toEqual({
+      status: "forbidden",
+      missingScope: "operator.admin",
+    });
+    await expect(getPairedNode("node-1", baseDir)).resolves.toBeNull();
+
+    await expect(
+      approveNodePairing(request.request.requestId, { callerScopes: ["operator.admin"] }, baseDir),
+    ).resolves.toEqual({
+      requestId: request.request.requestId,
+      node: expect.objectContaining({
+        nodeId: "node-1",
+        commands: ["system.run"],
+      }),
+    });
+  });
+
+  test("requires operator.admin when system.run is padded", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "openclaw-node-pairing-"));
+    const request = await requestNodePairing(
+      {
+        nodeId: "node-1",
+        platform: "linux",
+        commands: [" system.run "],
+      },
+      baseDir,
+    );
+
+    await expect(
+      approveNodePairing(request.request.requestId, { callerScopes: ["operator.write"] }, baseDir),
+    ).resolves.toEqual({
+      status: "forbidden",
+      missingScope: "operator.admin",
+    });
+    await expect(getPairedNode("node-1", baseDir)).resolves.toBeNull();
+  });
+
+  test("requires operator.write to approve non-exec node commands", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "openclaw-node-pairing-"));
+    const request = await requestNodePairing(
+      {
+        nodeId: "node-1",
+        platform: "darwin",
+        commands: ["canvas.present"],
+      },
+      baseDir,
+    );
+
+    await expect(
+      approveNodePairing(
+        request.request.requestId,
+        { callerScopes: ["operator.pairing"] },
+        baseDir,
+      ),
+    ).resolves.toEqual({
+      status: "forbidden",
+      missingScope: "operator.write",
+    });
+    await expect(getPairedNode("node-1", baseDir)).resolves.toBeNull();
+    await expect(
+      approveNodePairing(request.request.requestId, { callerScopes: ["operator.write"] }, baseDir),
+    ).resolves.toEqual({
+      requestId: request.request.requestId,
+      node: expect.objectContaining({
+        nodeId: "node-1",
+        commands: ["canvas.present"],
+      }),
+    });
+  });
+
   test("treats multibyte same-length token input as mismatch without throwing", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "openclaw-node-pairing-"));
     const token = await setupPairedNode(baseDir);

@@ -132,3 +132,57 @@ describe("createNodesTool screen_record duration guardrails", () => {
     expect(prepareCall?.params).not.toHaveProperty("rawCommand");
   });
 });
+
+describe("createNodesTool pairing approval scopes", () => {
+  beforeEach(() => {
+    gatewayMocks.callGatewayTool.mockReset();
+    gatewayMocks.readGatewayCallOptions.mockReset();
+    gatewayMocks.readGatewayCallOptions.mockReturnValue({});
+  });
+
+  it("requests operator.admin before approving a system.run node", async () => {
+    gatewayMocks.callGatewayTool.mockImplementation(async (method: string) => {
+      if (method === "node.pair.list") {
+        return { pending: [{ requestId: "req-1", commands: [" system.run "] }] };
+      }
+      return { requestId: "req-1" };
+    });
+    const tool = createNodesTool();
+
+    await tool.execute("call-approve-exec", { action: "approve", requestId: "req-1" });
+
+    expect(gatewayMocks.callGatewayTool).toHaveBeenNthCalledWith(
+      1,
+      "node.pair.list",
+      {},
+      {},
+      { scopes: ["operator.pairing", "operator.write"] },
+    );
+    expect(gatewayMocks.callGatewayTool).toHaveBeenNthCalledWith(
+      2,
+      "node.pair.approve",
+      {},
+      { requestId: "req-1" },
+      { scopes: ["operator.admin"] },
+    );
+  });
+
+  it("requests operator.write before approving a non-exec node", async () => {
+    gatewayMocks.callGatewayTool.mockImplementation(async (method: string) => {
+      if (method === "node.pair.list") {
+        return { pending: [{ requestId: "req-2", commands: ["canvas.snapshot"] }] };
+      }
+      return { requestId: "req-2" };
+    });
+    const tool = createNodesTool();
+
+    await tool.execute("call-approve-canvas", { action: "approve", requestId: "req-2" });
+
+    expect(gatewayMocks.callGatewayTool).toHaveBeenLastCalledWith(
+      "node.pair.approve",
+      {},
+      { requestId: "req-2" },
+      { scopes: ["operator.write"] },
+    );
+  });
+});

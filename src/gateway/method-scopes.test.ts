@@ -41,6 +41,16 @@ describe("operator scope authorization", () => {
       allowed: false,
       missingScope: "operator.write",
     });
+    expect(authorizeOperatorScopesForMethod("node.pair.approve", ["operator.pairing"])).toEqual({
+      allowed: false,
+      missingScope: "operator.write",
+    });
+    expect(authorizeOperatorScopesForMethod("node.pair.approve", ["operator.write"])).toEqual({
+      allowed: true,
+    });
+    expect(resolveLeastPrivilegeOperatorScopesForMethod("node.pair.approve")).toEqual([
+      "operator.write",
+    ]);
   });
 
   it("requires approvals scope for approval methods", () => {

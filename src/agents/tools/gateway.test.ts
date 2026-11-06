@@ -145,6 +145,24 @@ describe("gateway tool defaults", () => {
     expect(opts.token).toBe("explicit-token");
   });
 
+  it("lets callers override least-privilege scopes", async () => {
+    callGatewayMock.mockResolvedValueOnce({ ok: true });
+    await callGatewayTool(
+      "node.pair.approve",
+      {},
+      { requestId: "req-1" },
+      {
+        scopes: ["operator.admin"],
+      },
+    );
+    expect(callGatewayMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: "node.pair.approve",
+        scopes: ["operator.admin"],
+      }),
+    );
+  });
+
   it("uses least-privilege write scope for write methods", async () => {
     callGatewayMock.mockResolvedValueOnce({ ok: true });
     await callGatewayTool("wake", {}, { mode: "now", text: "hi" });

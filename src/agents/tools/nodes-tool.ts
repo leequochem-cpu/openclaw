@@ -17,6 +17,8 @@ import {
 } from "../../cli/nodes-screen.js";
 import { parseDurationMs } from "../../cli/parse-duration.js";
 import type { OpenClawConfig } from "../../config/config.js";
+import type { OperatorScope } from "../../gateway/method-scopes.js";
+import { NODE_SYSTEM_RUN_COMMANDS } from "../../infra/node-commands.js";
 import { parsePreparedSystemRunPayload } from "../../infra/system-run-approval-context.js";
 import { imageMimeFromFormat } from "../../media/mime.js";
 import type { GatewayMessageChannel } from "../../utils/message-channel.js";
@@ -71,6 +73,32 @@ const NODE_READ_ACTION_COMMANDS = {
   device_health: "device.health",
 } as const;
 type GatewayCallOptions = ReturnType<typeof readGatewayCallOptions>;
+const NODE_SYSTEM_RUN_COMMAND_SET = new Set<string>(NODE_SYSTEM_RUN_COMMANDS);
+
+function resolveApproveScopes(commands: unknown): OperatorScope[] {
+  const normalized = Array.isArray(commands)
+    ? commands
+        .filter((value): value is string => typeof value === "string")
+        .map((value) => value.trim())
+        .filter((value) => value.length > 0)
+    : [];
+  if (normalized.some((command) => NODE_SYSTEM_RUN_COMMAND_SET.has(command))) {
+    return ["operator.admin"];
+  }
+  return ["operator.write"];
+}
+
+async function resolveNodePairApproveScopes(
+  gatewayOpts: GatewayCallOptions,
+  requestId: string,
+): Promise<OperatorScope[]> {
+  const pairing = await callGatewayTool<{
+    pending?: Array<{ requestId?: string; commands?: unknown }>;
+  }>("node.pair.list", gatewayOpts, {}, { scopes: ["operator.pairing", "operator.write"] });
+  const pending = Array.isArray(pairing?.pending) ? pairing.pending : [];
+  const match = pending.find((entry) => entry?.requestId === requestId);
+  return resolveApproveScopes(match?.commands);
+}
 
 async function invokeNodeCommandPayload(params: {
   gatewayOpts: GatewayCallOptions;
@@ -198,10 +226,16 @@ export function createNodesTool(options?: {
             const requestId = readStringParam(params, "requestId", {
               required: true,
             });
+            const scopes = await resolveNodePairApproveScopes(gatewayOpts, requestId);
             return jsonResult(
-              await callGatewayTool("node.pair.approve", gatewayOpts, {
-                requestId,
-              }),
+              await callGatewayTool(
+                "node.pair.approve",
+                gatewayOpts,
+                {
+                  requestId,
+                },
+                { scopes },
+              ),
             );
           }
           case "reject": {

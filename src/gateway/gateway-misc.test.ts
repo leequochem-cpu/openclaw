@@ -8,6 +8,7 @@ import { GatewayClient } from "./client.js";
 import { handleControlUiHttpRequest } from "./control-ui.js";
 import {
   DEFAULT_DANGEROUS_NODE_COMMANDS,
+  filterDeclaredNodeCommands,
   resolveNodeCommandAllowlist,
 } from "./node-command-policy.js";
 import type { RequestFrame } from "./protocol/index.js";
@@ -392,6 +393,50 @@ describe("resolveNodeCommandAllowlist", () => {
     expect(allow.has("system.run")).toBe(false);
     expect(allow.has("system.which")).toBe(false);
     expect(allow.has("device.info")).toBe(true);
+  });
+});
+
+describe("filterDeclaredNodeCommands", () => {
+  const allowlist = new Set(["canvas.snapshot", "system.run"]);
+
+  it("keeps allowlisted commands when the node has no pairing record", () => {
+    expect(
+      filterDeclaredNodeCommands({
+        declared: ["canvas.snapshot", "system.run", "camera.snap"],
+        allowlist,
+        pairedCommands: null,
+      }),
+    ).toEqual(["canvas.snapshot", "system.run"]);
+  });
+
+  it("drops commands that were not stored at approval", () => {
+    expect(
+      filterDeclaredNodeCommands({
+        declared: [" canvas.snapshot ", "system.run"],
+        allowlist,
+        pairedCommands: ["canvas.snapshot"],
+      }),
+    ).toEqual(["canvas.snapshot"]);
+  });
+
+  it("treats a pairing record with no commands as having none approved", () => {
+    expect(
+      filterDeclaredNodeCommands({
+        declared: ["canvas.snapshot", "system.run"],
+        allowlist,
+        pairedCommands: [],
+      }),
+    ).toEqual([]);
+  });
+
+  it("matches padded approved exec commands after trim", () => {
+    expect(
+      filterDeclaredNodeCommands({
+        declared: ["system.run"],
+        allowlist,
+        pairedCommands: [" system.run "],
+      }),
+    ).toEqual(["system.run"]);
   });
 });
 

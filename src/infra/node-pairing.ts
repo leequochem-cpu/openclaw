@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { roleScopesAllow } from "../shared/operator-scope-compat.js";
+import { NODE_SYSTEM_RUN_COMMANDS } from "./node-commands.js";
 import {
   createAsyncLock,
   pruneExpiredPending,
@@ -51,8 +53,35 @@ type NodePairingStateFile = {
 };
 
 const PENDING_TTL_MS = 5 * 60 * 1000;
+const OPERATOR_ROLE = "operator";
+const OPERATOR_WRITE_SCOPE = "operator.write";
+const OPERATOR_ADMIN_SCOPE = "operator.admin";
+const NODE_SYSTEM_RUN_COMMAND_SET = new Set<string>(NODE_SYSTEM_RUN_COMMANDS);
 
 const withLock = createAsyncLock();
+
+type ApprovedNodePairingResult = { requestId: string; node: NodePairingPairedNode };
+type ForbiddenNodePairingResult = { status: "forbidden"; missingScope: string };
+type ApproveNodePairingResult = ApprovedNodePairingResult | ForbiddenNodePairingResult | null;
+type NodePairingApproveOptions = { callerScopes?: readonly string[] };
+
+function normalizeNodeCommands(commands: readonly string[] | undefined): string[] {
+  if (!Array.isArray(commands)) {
+    return [];
+  }
+  return commands.map((command) => command.trim()).filter((command) => command.length > 0);
+}
+
+function resolveNodeApprovalRequiredScope(pending: NodePairingPendingRequest): string | null {
+  const commands = normalizeNodeCommands(pending.commands);
+  if (commands.some((command) => NODE_SYSTEM_RUN_COMMAND_SET.has(command))) {
+    return OPERATOR_ADMIN_SCOPE;
+  }
+  if (commands.length > 0) {
+    return OPERATOR_WRITE_SCOPE;
+  }
+  return null;
+}
 
 async function loadState(baseDir?: string): Promise<NodePairingStateFile> {
   const { pendingPath, pairedPath } = resolvePairingPaths(baseDir, "nodes");
@@ -146,12 +175,41 @@ export async function requestNodePairing(
 export async function approveNodePairing(
   requestId: string,
   baseDir?: string,
-): Promise<{ requestId: string; node: NodePairingPairedNode } | null> {
+): Promise<ApprovedNodePairingResult | null>;
+export async function approveNodePairing(
+  requestId: string,
+  options: NodePairingApproveOptions,
+  baseDir?: string,
+): Promise<ApproveNodePairingResult>;
+export async function approveNodePairing(
+  requestId: string,
+  optionsOrBaseDir?: NodePairingApproveOptions | string,
+  maybeBaseDir?: string,
+): Promise<ApproveNodePairingResult> {
+  const options =
+    typeof optionsOrBaseDir === "string" || optionsOrBaseDir === undefined
+      ? undefined
+      : optionsOrBaseDir;
+  const baseDir = typeof optionsOrBaseDir === "string" ? optionsOrBaseDir : maybeBaseDir;
   return await withLock(async () => {
     const state = await loadState(baseDir);
     const pending = state.pendingById[requestId];
     if (!pending) {
       return null;
+    }
+
+    // Direct callers omit options and stay unrestricted. Gateway RPC always
+    // passes the session scopes and fails closed when they are missing.
+    const requiredScope = resolveNodeApprovalRequiredScope(pending);
+    if (requiredScope && options !== undefined) {
+      const allowed = roleScopesAllow({
+        role: OPERATOR_ROLE,
+        requestedScopes: [requiredScope],
+        allowedScopes: options.callerScopes ?? [],
+      });
+      if (!allowed) {
+        return { status: "forbidden", missingScope: requiredScope };
+      }
     }
 
     const now = Date.now();
