@@ -35,7 +35,6 @@ const METHOD_SCOPE_GROUPS: Record<OperatorScope, readonly string[]> = {
   [PAIRING_SCOPE]: [
     "node.pair.request",
     "node.pair.list",
-    "node.pair.approve",
     "node.pair.reject",
     "node.pair.verify",
     "device.pair.list",
@@ -96,6 +95,7 @@ const METHOD_SCOPE_GROUPS: Record<OperatorScope, readonly string[]> = {
     "tts.setProvider",
     "voicewake.set",
     "node.invoke",
+    "node.pair.approve",
     "chat.send",
     "chat.abort",
     "browser.request",

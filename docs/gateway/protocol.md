@@ -153,6 +153,11 @@ Method scope is only the first gate. Some slash commands reached through
 `chat.send` apply stricter command-level checks on top. For example, persistent
 `/config set` and `/config unset` writes require `operator.admin`.
 
+`node.pair.approve` requires `operator.write`. A pending node that declares
+`system.run`, `system.run.prepare`, or `system.which` also requires
+`operator.admin`. After approval, reconnects keep only the commands stored on
+that pairing record.
+
 ### Caps/commands/permissions (node)
 
 Nodes declare capability claims at connect time:

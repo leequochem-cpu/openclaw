@@ -57,7 +57,7 @@ Methods:
 
 - `node.pair.request` — create or reuse a pending request.
 - `node.pair.list` — list pending + paired nodes.
-- `node.pair.approve` — approve a pending request (issues token).
+- `node.pair.approve` — approve a pending request (issues token). Requires `operator.write`. Requests that declare `system.run`, `system.run.prepare`, or `system.which` also require `operator.admin`.
 - `node.pair.reject` — reject a pending request.
 - `node.pair.verify` — verify `{ nodeId, token }`.
 

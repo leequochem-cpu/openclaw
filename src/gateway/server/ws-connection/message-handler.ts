@@ -15,7 +15,7 @@ import {
   updatePairedDeviceMetadata,
   verifyDeviceToken,
 } from "../../../infra/device-pairing.js";
-import { updatePairedNodeMetadata } from "../../../infra/node-pairing.js";
+import { getPairedNode, updatePairedNodeMetadata } from "../../../infra/node-pairing.js";
 import { recordRemoteNodeInfo, refreshRemoteNodeBins } from "../../../infra/skills-remote.js";
 import { upsertPresence } from "../../../infra/system-presence.js";
 import { loadVoiceWakeConfig } from "../../../infra/voicewake.js";
@@ -43,7 +43,10 @@ import {
   isTrustedProxyAddress,
   resolveClientIp,
 } from "../../net.js";
-import { resolveNodeCommandAllowlist } from "../../node-command-policy.js";
+import {
+  filterDeclaredNodeCommands,
+  resolveNodeCommandAllowlist,
+} from "../../node-command-policy.js";
 import { checkBrowserOrigin } from "../../origin-check.js";
 import { GATEWAY_CLIENT_IDS, GATEWAY_CLIENT_MODES } from "../../protocol/client-info.js";
 import {
@@ -962,15 +965,17 @@ export function attachGatewayWsMessageHandler(params: {
 
         if (role === "node") {
           const cfg = loadConfig();
+          const nodeId = connectParams.device?.id ?? connectParams.client.id;
+          const pairedNode = await getPairedNode(nodeId);
           const allowlist = resolveNodeCommandAllowlist(cfg, {
             platform: connectParams.client.platform,
             deviceFamily: connectParams.client.deviceFamily,
           });
-          const declared = Array.isArray(connectParams.commands) ? connectParams.commands : [];
-          const filtered = declared
-            .map((cmd) => cmd.trim())
-            .filter((cmd) => cmd.length > 0 && allowlist.has(cmd));
-          connectParams.commands = filtered;
+          connectParams.commands = filterDeclaredNodeCommands({
+            declared: connectParams.commands,
+            allowlist,
+            pairedCommands: pairedNode ? (pairedNode.commands ?? []) : null,
+          });
         }
 
         const shouldTrackPresence = !isGatewayCliClient(connectParams.client);

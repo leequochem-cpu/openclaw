@@ -188,6 +188,35 @@ export function resolveNodeCommandAllowlist(
   return allow;
 }
 
+/**
+ * Intersect a node's declared commands with the platform allowlist and, when
+ * the node already has a pairing record, the commands stored at approval.
+ * `pairedCommands === null` means there is no pairing record yet.
+ */
+export function filterDeclaredNodeCommands(params: {
+  declared: readonly string[] | undefined;
+  allowlist: ReadonlySet<string>;
+  pairedCommands: readonly string[] | null;
+}): string[] {
+  const paired =
+    params.pairedCommands === null
+      ? null
+      : new Set(
+          params.pairedCommands
+            .map((command) => command.trim())
+            .filter((command) => command.length > 0),
+        );
+  const declared = Array.isArray(params.declared) ? params.declared : [];
+  return declared
+    .map((command) => command.trim())
+    .filter(
+      (command) =>
+        command.length > 0 &&
+        params.allowlist.has(command) &&
+        (paired === null || paired.has(command)),
+    );
+}
+
 export function isNodeCommandAllowed(params: {
   command: string;
   declaredCommands?: string[];
