@@ -71,6 +71,16 @@ export type DevicePairingList = {
   paired: PairedDevice[];
 };
 
+export type ApprovedDevicePairing = {
+  requestId: string;
+  device: PairedDevice;
+};
+
+export type ForbiddenDevicePairing = {
+  forbidden: true;
+  missingScope: string;
+};
+
 type DevicePairingStateFile = {
   pendingById: Record<string, DevicePairingPendingRequest>;
   pairedByDeviceId: Record<string, PairedDevice>;
@@ -179,6 +189,23 @@ function mergePendingDevicePairingRequest(
     isRepair: existing.isRepair || isRepair,
     ts: Date.now(),
   };
+}
+
+function findMissingOperatorScope(params: {
+  requestedScopes: string[] | undefined;
+  callerScopes: readonly string[];
+}): string | undefined {
+  const requestedOperatorScopes = normalizeDeviceAuthScopes(params.requestedScopes).filter(
+    (scope) => scope.startsWith("operator."),
+  );
+  return requestedOperatorScopes.find(
+    (scope) =>
+      !roleScopesAllow({
+        role: "operator",
+        requestedScopes: [scope],
+        allowedScopes: params.callerScopes,
+      }),
+  );
 }
 
 function scopesAllow(requested: string[], allowed: string[]): boolean {
@@ -320,12 +347,36 @@ export async function requestDevicePairing(
 export async function approveDevicePairing(
   requestId: string,
   baseDir?: string,
-): Promise<{ requestId: string; device: PairedDevice } | null> {
+): Promise<ApprovedDevicePairing | null>;
+export async function approveDevicePairing(
+  requestId: string,
+  options: { callerScopes: readonly string[] },
+  baseDir?: string,
+): Promise<ApprovedDevicePairing | ForbiddenDevicePairing | null>;
+export async function approveDevicePairing(
+  requestId: string,
+  optionsOrBaseDir?: string | { callerScopes: readonly string[] },
+  maybeBaseDir?: string,
+): Promise<ApprovedDevicePairing | ForbiddenDevicePairing | null> {
+  const callerScopes =
+    optionsOrBaseDir && typeof optionsOrBaseDir === "object"
+      ? optionsOrBaseDir.callerScopes
+      : undefined;
+  const baseDir = typeof optionsOrBaseDir === "string" ? optionsOrBaseDir : maybeBaseDir;
   return await withLock(async () => {
     const state = await loadState(baseDir);
     const pending = state.pendingById[requestId];
     if (!pending) {
       return null;
+    }
+    if (callerScopes !== undefined) {
+      const missingScope = findMissingOperatorScope({
+        requestedScopes: pending.scopes,
+        callerScopes,
+      });
+      if (missingScope) {
+        return { forbidden: true, missingScope };
+      }
     }
     const now = Date.now();
     const existing = state.pairedByDeviceId[pending.deviceId];

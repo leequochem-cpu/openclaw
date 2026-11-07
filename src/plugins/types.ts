@@ -166,6 +166,11 @@ export type PluginCommandContext = {
   accountId?: string;
   /** Thread/topic id if available */
   messageThreadId?: number;
+  /**
+   * Operator scopes from the gateway client that issued this command.
+   * Absent for external channel commands, which do not carry a gateway connect scope set.
+   */
+  gatewayClientScopes?: string[];
 };
 
 /**

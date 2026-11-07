@@ -355,6 +355,19 @@ export default function register(api: OpenClawPluginApi) {
       }
 
       if (action === "approve") {
+        // chat.send stamps the gateway connect scopes. External channel commands do not.
+        const gatewayClientScopes = Array.isArray(ctx.gatewayClientScopes)
+          ? ctx.gatewayClientScopes
+          : undefined;
+        if (
+          gatewayClientScopes &&
+          !gatewayClientScopes.includes("operator.pairing") &&
+          !gatewayClientScopes.includes("operator.admin")
+        ) {
+          return {
+            text: "⚠️ This command requires operator.pairing for internal gateway callers.",
+          };
+        }
         const requested = tokens[1]?.trim();
         const list = await listDevicePairing();
         if (list.pending.length === 0) {
@@ -383,9 +396,14 @@ export default function register(api: OpenClawPluginApi) {
         if (!pending) {
           return { text: "Pairing request not found." };
         }
-        const approved = await approveDevicePairing(pending.requestId);
+        const approved = gatewayClientScopes
+          ? await approveDevicePairing(pending.requestId, { callerScopes: gatewayClientScopes })
+          : await approveDevicePairing(pending.requestId);
         if (!approved) {
           return { text: "Pairing request not found." };
+        }
+        if ("forbidden" in approved) {
+          return { text: `⚠️ Cannot approve a request requiring ${approved.missingScope}.` };
         }
         const label = approved.device.displayName?.trim() || approved.device.deviceId;
         const platform = approved.device.platform?.trim();
