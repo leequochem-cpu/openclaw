@@ -253,6 +253,7 @@ export async function executePluginCommand(params: {
   to?: PluginCommandContext["to"];
   accountId?: PluginCommandContext["accountId"];
   messageThreadId?: PluginCommandContext["messageThreadId"];
+  gatewayClientScopes?: PluginCommandContext["gatewayClientScopes"];
 }): Promise<PluginCommandResult> {
   const { command, args, senderId, channel, isAuthorizedSender, commandBody, config } = params;
 
@@ -280,6 +281,7 @@ export async function executePluginCommand(params: {
     to: params.to,
     accountId: params.accountId,
     messageThreadId: params.messageThreadId,
+    gatewayClientScopes: params.gatewayClientScopes,
   };
 
   // Lock registry during execution to prevent concurrent modifications

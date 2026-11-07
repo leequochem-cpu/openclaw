@@ -6,6 +6,7 @@ import {
   approveDevicePairing,
   clearDevicePairing,
   getPairedDevice,
+  listDevicePairing,
   removePairedDevice,
   requestDevicePairing,
   rotateDeviceToken,
@@ -240,6 +241,66 @@ describe("device pairing tokens", () => {
     await expect(getPairedDevice("device-1", baseDir)).resolves.toBeNull();
 
     await expect(removePairedDevice("device-1", baseDir)).resolves.toBeNull();
+  });
+
+  test("rejects operator.admin approvals that exceed the caller scopes and keeps the pending request", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "openclaw-device-pairing-"));
+    const pending = await requestDevicePairing(
+      {
+        deviceId: "device-admin",
+        publicKey: "public-key-admin",
+        displayName: "Escalating Phone",
+        role: "operator",
+        scopes: ["operator.admin"],
+      },
+      baseDir,
+    );
+
+    const rejected = await approveDevicePairing(
+      pending.request.requestId,
+      { callerScopes: ["operator.write", "operator.pairing"] },
+      baseDir,
+    );
+    expect(rejected).toEqual({ forbidden: true, missingScope: "operator.admin" });
+    await expect(getPairedDevice("device-admin", baseDir)).resolves.toBeNull();
+
+    const list = await listDevicePairing(baseDir);
+    expect(list.pending.map((entry) => entry.requestId)).toEqual([pending.request.requestId]);
+
+    const approved = await approveDevicePairing(
+      pending.request.requestId,
+      { callerScopes: ["operator.admin"] },
+      baseDir,
+    );
+    expect(approved && "device" in approved ? approved.device.scopes : undefined).toEqual([
+      "operator.admin",
+    ]);
+    expect(
+      approved && "device" in approved ? approved.device.tokens?.operator?.scopes : undefined,
+    ).toEqual(["operator.admin"]);
+  });
+
+  test("still approves when the caller scopes cover the requested operator scopes", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "openclaw-device-pairing-"));
+    const pending = await requestDevicePairing(
+      {
+        deviceId: "device-write",
+        publicKey: "public-key-write",
+        role: "operator",
+        scopes: ["operator.read", "operator.write"],
+      },
+      baseDir,
+    );
+
+    const approved = await approveDevicePairing(
+      pending.request.requestId,
+      { callerScopes: ["operator.write", "operator.pairing"] },
+      baseDir,
+    );
+    expect(approved && "device" in approved ? approved.device.scopes : undefined).toEqual([
+      "operator.read",
+      "operator.write",
+    ]);
   });
 
   test("clears paired device state by device id", async () => {

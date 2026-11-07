@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
   clearPluginCommands,
+  executePluginCommand,
   getPluginCommandSpecs,
   listPluginCommands,
   registerPluginCommand,
@@ -93,5 +94,31 @@ describe("registerPluginCommand", () => {
         acceptsArgs: false,
       },
     ]);
+  });
+});
+
+describe("executePluginCommand", () => {
+  it("forwards gateway client scopes into the command context", async () => {
+    let seen: string[] | undefined;
+    const result = await executePluginCommand({
+      command: {
+        name: "scopeprobe",
+        description: "Scope probe",
+        pluginId: "demo-plugin",
+        handler: async (ctx) => {
+          seen = ctx.gatewayClientScopes;
+          return { text: "ok" };
+        },
+      },
+      args: "approve",
+      channel: "webchat",
+      isAuthorizedSender: true,
+      commandBody: "/scopeprobe approve",
+      config: {},
+      gatewayClientScopes: ["operator.write", "operator.pairing"],
+    });
+
+    expect(result).toEqual({ text: "ok" });
+    expect(seen).toEqual(["operator.write", "operator.pairing"]);
   });
 });
