@@ -88,6 +88,49 @@ const connectNodeClientWithPairing = async (params: Parameters<typeof connectNod
   }
 };
 
+const waitForNodeDisconnected = async (nodeId: string) => {
+  await expect
+    .poll(async () => {
+      const listRes = await rpcReq<{
+        nodes?: Array<{ nodeId: string; connected?: boolean }>;
+      }>(ws, "node.list", {});
+      return (listRes.payload?.nodes ?? []).some(
+        (node) => node.connected && node.nodeId === nodeId,
+      );
+    }, FAST_WAIT_OPTS)
+    .toBe(false);
+};
+
+const connectNodeClientWithNodePairing = async (
+  params: Parameters<typeof connectNodeClient>[0],
+) => {
+  const { onEvent: _onEvent, ...provisionalParams } = params;
+  const provisionalClient = await connectNodeClientWithPairing(provisionalParams);
+  const listRes = await rpcReq<{
+    nodes?: Array<{ nodeId: string; displayName?: string; connected?: boolean }>;
+  }>(ws, "node.list", {});
+  const provisionalNode = (listRes.payload?.nodes ?? []).find((node) => {
+    if (!node.connected) {
+      return false;
+    }
+    if (params.displayName) {
+      return node.displayName === params.displayName;
+    }
+    return true;
+  });
+  const nodeId = provisionalNode?.nodeId ?? "";
+  expect(nodeId).toBeTruthy();
+  provisionalClient.stop();
+  await waitForNodeDisconnected(nodeId);
+
+  const { approveNodePairing, listNodePairing } = await import("../infra/node-pairing.js");
+  const pending = (await listNodePairing()).pending.find((request) => request.nodeId === nodeId);
+  expect(pending?.requestId).toBeTruthy();
+  await approveNodePairing(pending?.requestId ?? "");
+
+  return await connectNodeClient(params);
+};
+
 describe("gateway role enforcement", () => {
   test("enforces operator and node permissions", async () => {
     let nodeClient: GatewayClient | undefined;
@@ -264,11 +307,16 @@ describe("gateway node command allowlist", () => {
         new Promise<{ id?: string; nodeId?: string }>((resolve) => {
           resolveInvoke = resolve;
         });
-      allowedClient = await connectNodeClientWithPairing({
+      const { loadOrCreateDeviceIdentity } = await import("../infra/device-identity.js");
+      const allowedDeviceIdentity = loadOrCreateDeviceIdentity(
+        path.join(os.tmpdir(), `openclaw-node-allowed-${Date.now()}-${Math.random()}.json`),
+      );
+      allowedClient = await connectNodeClientWithNodePairing({
         port,
         commands: ["canvas.snapshot"],
         instanceId: "node-allowed",
         displayName: "node-allowed",
+        deviceIdentity: allowedDeviceIdentity,
         onEvent: (evt) => {
           if (evt.event === "node.invoke.request") {
             const payload = evt.payload as { id?: string; nodeId?: string };
@@ -406,7 +454,7 @@ describe("gateway node command allowlist", () => {
 
       let client: GatewayClient | undefined;
       try {
-        client = await connectNodeClientWithPairing({
+        client = await connectNodeClientWithNodePairing({
           port,
           commands: ["system.run", "canvas.snapshot"],
           platform: testCase.platform,
@@ -441,6 +489,141 @@ describe("gateway node command allowlist", () => {
       } finally {
         client?.stop();
       }
+    }
+  });
+
+  test("blocks declared host commands until node pairing exists", async () => {
+    const { loadOrCreateDeviceIdentity } = await import("../infra/device-identity.js");
+    const deviceIdentity = loadOrCreateDeviceIdentity(
+      path.join(os.tmpdir(), `openclaw-node-device-only-${Date.now()}-${Math.random()}.json`),
+    );
+    const displayName = "node-device-paired-only";
+    const findConnectedNode = async () => {
+      const listRes = await rpcReq<{
+        nodes?: Array<{
+          nodeId: string;
+          displayName?: string;
+          connected?: boolean;
+          commands?: string[];
+        }>;
+      }>(ws, "node.list", {});
+      return (listRes.payload?.nodes ?? []).find(
+        (node) => node.connected && node.displayName === displayName,
+      );
+    };
+
+    let nodeClient: GatewayClient | undefined;
+    try {
+      nodeClient = await connectNodeClientWithPairing({
+        port,
+        commands: ["canvas.snapshot", "system.run"],
+        platform: "darwin",
+        instanceId: displayName,
+        displayName,
+        deviceIdentity,
+      });
+
+      await expect
+        .poll(async () => (await findConnectedNode())?.commands?.toSorted() ?? [], FAST_WAIT_OPTS)
+        .toEqual([]);
+
+      const nodeId = (await findConnectedNode())?.nodeId ?? "";
+      expect(nodeId).toBeTruthy();
+
+      const pairingList = await rpcReq<{
+        pending?: Array<{ nodeId?: string; commands?: string[] }>;
+      }>(ws, "node.pair.list", {});
+      expect(pairingList.ok).toBe(true);
+      expect(pairingList.payload?.pending ?? []).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            nodeId,
+            commands: ["canvas.snapshot", "system.run"],
+          }),
+        ]),
+      );
+
+      const canvasRes = await rpcReq(ws, "node.invoke", {
+        nodeId,
+        command: "canvas.snapshot",
+        params: { format: "png" },
+        idempotencyKey: "device-paired-only-canvas",
+      });
+      expect(canvasRes.ok).toBe(false);
+      expect(canvasRes.error?.message ?? "").toContain("node command not allowed");
+
+      const systemRunRes = await rpcReq(ws, "node.invoke", {
+        nodeId,
+        command: "system.run",
+        params: { command: "echo blocked" },
+        idempotencyKey: "device-paired-only-system-run",
+      });
+      expect(systemRunRes.ok).toBe(false);
+      expect(systemRunRes.error?.message ?? "").toContain("node command not allowed");
+    } finally {
+      nodeClient?.stop();
+    }
+  });
+
+  test("does not widen approved node commands on reconnect", async () => {
+    const { loadOrCreateDeviceIdentity } = await import("../infra/device-identity.js");
+    const deviceIdentity = loadOrCreateDeviceIdentity(
+      path.join(os.tmpdir(), `openclaw-node-reconnect-${Date.now()}-${Math.random()}.json`),
+    );
+    const displayName = "node-reconnect-command-pin";
+    const findConnectedNode = async () => {
+      const listRes = await rpcReq<{
+        nodes?: Array<{
+          nodeId: string;
+          displayName?: string;
+          connected?: boolean;
+          commands?: string[];
+        }>;
+      }>(ws, "node.list", {});
+      return (listRes.payload?.nodes ?? []).find(
+        (node) => node.connected && node.displayName === displayName,
+      );
+    };
+
+    let nodeClient: GatewayClient | undefined;
+    try {
+      nodeClient = await connectNodeClientWithNodePairing({
+        port,
+        commands: ["canvas.snapshot"],
+        platform: "darwin",
+        instanceId: displayName,
+        displayName,
+        deviceIdentity,
+      });
+      const pairedNodeId = (await findConnectedNode())?.nodeId ?? "";
+      expect(pairedNodeId).toBeTruthy();
+      nodeClient.stop();
+      await waitForNodeDisconnected(pairedNodeId);
+
+      nodeClient = await connectNodeClient({
+        port,
+        commands: ["canvas.snapshot", "system.run"],
+        platform: "darwin",
+        instanceId: displayName,
+        displayName,
+        deviceIdentity,
+      });
+
+      await expect
+        .poll(async () => (await findConnectedNode())?.commands?.toSorted() ?? [], FAST_WAIT_OPTS)
+        .toEqual(["canvas.snapshot"]);
+
+      const connectedId = (await findConnectedNode())?.nodeId ?? "";
+      const systemRunRes = await rpcReq(ws, "node.invoke", {
+        nodeId: connectedId,
+        command: "system.run",
+        params: { command: "echo blocked" },
+        idempotencyKey: "reconnect-system-run",
+      });
+      expect(systemRunRes.ok).toBe(false);
+      expect(systemRunRes.error?.message ?? "").toContain("node command not allowed");
+    } finally {
+      nodeClient?.stop();
     }
   });
 });
