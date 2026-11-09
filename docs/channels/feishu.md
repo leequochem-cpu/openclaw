@@ -195,7 +195,7 @@ Edit `~/.openclaw/openclaw.json`:
 }
 ```
 
-If you use `connectionMode: "webhook"`, set `verificationToken`. The Feishu webhook server binds to `127.0.0.1` by default; set `webhookHost` only if you intentionally need a different bind address.
+If you use `connectionMode: "webhook"`, set both `verificationToken` and `encryptKey`. Webhook mode does not start without `encryptKey`, because that key is what authenticates inbound events. The Feishu webhook server binds to `127.0.0.1` by default; set `webhookHost` only if you intentionally need a different bind address.
 
 #### Verification Token (webhook mode)
 
@@ -204,9 +204,11 @@ When using webhook mode, set `channels.feishu.verificationToken` in your config.
 1. In Feishu Open Platform, open your app
 2. Go to **Development** → **Events & Callbacks** (开发配置 → 事件与回调)
 3. Open the **Encryption** tab (加密策略)
-4. Copy **Verification Token**
+4. Copy **Verification Token** and **Encrypt Key**
 
 ![Verification Token location](../images/feishu-verification-token.png)
+
+Set `channels.feishu.encryptKey` to the Encrypt Key from that same page. A verification token alone does not authenticate webhook deliveries.
 
 ### Configure via environment variables
 
@@ -602,6 +604,7 @@ Key options:
 | `channels.feishu.connectionMode`                  | Event transport mode                    | `websocket`      |
 | `channels.feishu.defaultAccount`                  | Default account ID for outbound routing | `default`        |
 | `channels.feishu.verificationToken`               | Required for webhook mode               | -                |
+| `channels.feishu.encryptKey`                      | Required for webhook mode               | -                |
 | `channels.feishu.webhookPath`                     | Webhook route path                      | `/feishu/events` |
 | `channels.feishu.webhookHost`                     | Webhook bind host                       | `127.0.0.1`      |
 | `channels.feishu.webhookPort`                     | Webhook bind port                       | `3000`           |

@@ -521,6 +521,11 @@ export async function monitorSingleAccount(params: MonitorSingleAccountParams): 
   if (connectionMode === "webhook" && !account.verificationToken?.trim()) {
     throw new Error(`Feishu account "${accountId}" webhook mode requires verificationToken`);
   }
+  // Lark's EventDispatcher treats a missing encryptKey as valid, so a
+  // verificationToken alone does not authenticate inbound webhook events.
+  if (connectionMode === "webhook" && !account.encryptKey?.trim()) {
+    throw new Error(`Feishu account "${accountId}" webhook mode requires encryptKey`);
+  }
 
   const warmupCount = await warmupDedupFromDisk(accountId, log);
   if (warmupCount > 0) {
