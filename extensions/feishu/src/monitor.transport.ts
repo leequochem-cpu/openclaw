@@ -80,6 +80,9 @@ export async function monitorWebhook({
 }: MonitorTransportParams): Promise<void> {
   const log = runtime?.log ?? console.log;
   const error = runtime?.error ?? console.error;
+  if (!account.encryptKey?.trim()) {
+    throw new Error(`Feishu account "${accountId}" webhook mode requires encryptKey`);
+  }
 
   const port = account.config.webhookPort ?? 3000;
   const path = account.config.webhookPath ?? "/feishu/events";

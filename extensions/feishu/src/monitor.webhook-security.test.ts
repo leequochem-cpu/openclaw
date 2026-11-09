@@ -32,6 +32,8 @@ import {
   monitorFeishuProvider,
   stopFeishuMonitor,
 } from "./monitor.js";
+import { monitorWebhook } from "./monitor.transport.js";
+import type { ResolvedFeishuAccount } from "./types.js";
 
 async function getFreePort(): Promise<number> {
   const server = createServer();
@@ -64,6 +66,7 @@ function buildConfig(params: {
   path: string;
   port: number;
   verificationToken?: string;
+  encryptKey?: string;
 }): ClawdbotConfig {
   return {
     channels: {
@@ -78,6 +81,7 @@ function buildConfig(params: {
             webhookHost: "127.0.0.1",
             webhookPort: params.port,
             webhookPath: params.path,
+            encryptKey: params.encryptKey,
             verificationToken: params.verificationToken,
           },
         },
@@ -91,6 +95,7 @@ async function withRunningWebhookMonitor(
     accountId: string;
     path: string;
     verificationToken: string;
+    encryptKey: string;
   },
   run: (url: string) => Promise<void>,
 ) {
@@ -99,6 +104,7 @@ async function withRunningWebhookMonitor(
     accountId: params.accountId,
     path: params.path,
     port,
+    encryptKey: params.encryptKey,
     verificationToken: params.verificationToken,
   });
 
@@ -141,6 +147,47 @@ describe("Feishu webhook security hardening", () => {
     );
   });
 
+  it("rejects webhook mode without encryptKey", async () => {
+    probeFeishuMock.mockResolvedValue({ ok: true, botOpenId: "bot_open_id" });
+
+    const cfg = buildConfig({
+      accountId: "missing-encrypt-key",
+      path: "/hook-missing-encrypt",
+      port: await getFreePort(),
+      verificationToken: "verify_token",
+    });
+
+    await expect(monitorFeishuProvider({ config: cfg })).rejects.toThrow(/requires encryptKey/i);
+  });
+
+  it("refuses to start the webhook transport without encryptKey", async () => {
+    const account = {
+      accountId: "transport-missing-encrypt-key",
+      selectionSource: "explicit",
+      enabled: true,
+      configured: true,
+      domain: "feishu",
+      verificationToken: "verify_token",
+      config: {
+        enabled: true,
+        connectionMode: "webhook",
+        webhookHost: "127.0.0.1",
+        webhookPort: await getFreePort(),
+        webhookPath: "/hook-transport-missing-encrypt",
+      },
+    } as ResolvedFeishuAccount;
+
+    await expect(
+      monitorWebhook({
+        account,
+        accountId: account.accountId,
+        runtime: { log: vi.fn(), error: vi.fn(), exit: vi.fn() },
+        abortSignal: new AbortController().signal,
+        eventDispatcher: {} as never,
+      }),
+    ).rejects.toThrow(/requires encryptKey/i);
+  });
+
   it("returns 415 for POST requests without json content type", async () => {
     probeFeishuMock.mockResolvedValue({ ok: true, botOpenId: "bot_open_id" });
     await withRunningWebhookMonitor(
@@ -148,6 +195,7 @@ describe("Feishu webhook security hardening", () => {
         accountId: "content-type",
         path: "/hook-content-type",
         verificationToken: "verify_token",
+        encryptKey: "encrypt_key",
       },
       async (url) => {
         const response = await fetch(url, {
@@ -169,6 +217,7 @@ describe("Feishu webhook security hardening", () => {
         accountId: "rate-limit",
         path: "/hook-rate-limit",
         verificationToken: "verify_token",
+        encryptKey: "encrypt_key",
       },
       async (url) => {
         let saw429 = false;
