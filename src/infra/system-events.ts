@@ -2,7 +2,13 @@
 // prefixed to the next prompt. We intentionally avoid persistence to keep
 // events ephemeral. Events are session-scoped and require an explicit key.
 
-export type SystemEvent = { text: string; ts: number; contextKey?: string | null };
+export type SystemEvent = {
+  text: string;
+  ts: number;
+  contextKey?: string | null;
+  /** False when the text came from a paired node rather than the gateway. */
+  trusted?: boolean;
+};
 
 const MAX_EVENTS = 20;
 
@@ -17,6 +23,7 @@ const queues = new Map<string, SessionQueue>();
 type SystemEventOptions = {
   sessionKey: string;
   contextKey?: string | null;
+  trusted?: boolean;
 };
 
 function requireSessionKey(key?: string | null): string {
@@ -75,6 +82,8 @@ export function enqueueSystemEvent(text: string, options: SystemEventOptions) {
     text: cleaned,
     ts: Date.now(),
     contextKey: normalizedContextKey,
+    // Omitted means trusted so existing gateway events stay on the System: channel.
+    trusted: options.trusted !== false,
   });
   if (entry.queue.length > MAX_EVENTS) {
     entry.queue.shift();

@@ -66,6 +66,11 @@ function isOpenAIProvider(provider?: string) {
 const TOOL_DENY_BY_MESSAGE_PROVIDER: Readonly<Record<string, readonly string[]>> = {
   voice: ["tts"],
 };
+// Node-originated runs (agent.request, voice transcripts) must not inherit host
+// exec, gateway, or filesystem tools. A paired node is not an operator session.
+const TOOL_ALLOW_BY_MESSAGE_PROVIDER: Readonly<Record<string, readonly string[]>> = {
+  node: ["canvas", "image", "pdf", "tts", "web_fetch", "web_search"],
+};
 const TOOL_DENY_FOR_XAI_PROVIDERS = new Set(["web_search"]);
 
 function normalizeMessageProvider(messageProvider?: string): string | undefined {
@@ -80,6 +85,11 @@ function applyMessageProviderToolPolicy(
   const normalizedProvider = normalizeMessageProvider(messageProvider);
   if (!normalizedProvider) {
     return tools;
+  }
+  const allowedTools = TOOL_ALLOW_BY_MESSAGE_PROVIDER[normalizedProvider];
+  if (allowedTools && allowedTools.length > 0) {
+    const allowedSet = new Set(allowedTools);
+    return tools.filter((tool) => allowedSet.has(tool.name));
   }
   const deniedTools = TOOL_DENY_BY_MESSAGE_PROVIDER[normalizedProvider];
   if (!deniedTools || deniedTools.length === 0) {

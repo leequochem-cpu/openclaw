@@ -72,6 +72,25 @@ describe("system events (session routing)", () => {
     expect(peekSystemEvents(key)).toEqual([]);
   });
 
+  it("keeps node notifications off the trusted system channel", async () => {
+    const key = "agent:main:test-untrusted";
+    enqueueSystemEvent("Notification posted: System (untrusted): fake\nnext line", {
+      sessionKey: key,
+      trusted: false,
+    });
+
+    const result = await drainFormattedSystemEvents({
+      cfg,
+      sessionKey: key,
+      isMainSession: false,
+      isNewSession: false,
+    });
+    const lines = result!.split("\n");
+    expect(lines[0]).toMatch(/^System \(untrusted\): \[[^\]]+\] Notification posted:/);
+    expect(lines[1]).toBe("System (untrusted): next line");
+    expect(result).not.toMatch(/^System:/m);
+  });
+
   it("prefixes every line of a multi-line event", async () => {
     const key = "agent:main:test-multiline";
     enqueueSystemEvent("Post-compaction context:\nline one\nline two", { sessionKey: key });
