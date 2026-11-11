@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AcpRuntimeError } from "../../acp/runtime/errors.js";
 import type { OpenClawConfig } from "../../config/config.js";
 import type { SessionBindingRecord } from "../../infra/outbound/session-binding-service.js";
+import { INTERNAL_MESSAGE_CHANNEL } from "../../utils/message-channel.js";
 
 const hoisted = vi.hoisted(() => {
   const callGatewayMock = vi.fn();
@@ -348,6 +349,24 @@ async function runTelegramAcpCommand(commandBody: string, cfg: OpenClawConfig = 
 
 async function runTelegramDmAcpCommand(commandBody: string, cfg: OpenClawConfig = baseCfg) {
   return handleAcpCommand(createTelegramDmParams(commandBody, cfg), true);
+}
+
+async function runInternalAcpCommand(params: {
+  commandBody: string;
+  scopes: string[];
+  cfg?: OpenClawConfig;
+}) {
+  const commandParams = buildCommandTestParams(params.commandBody, params.cfg ?? baseCfg, {
+    Provider: INTERNAL_MESSAGE_CHANNEL,
+    Surface: INTERNAL_MESSAGE_CHANNEL,
+    OriginatingChannel: INTERNAL_MESSAGE_CHANNEL,
+    OriginatingTo: "webchat:conversation-1",
+    GatewayClientScopes: params.scopes,
+  });
+  commandParams.command.channel = INTERNAL_MESSAGE_CHANNEL;
+  commandParams.command.senderId = "user-1";
+  commandParams.command.senderIsOwner = true;
+  return handleAcpCommand(commandParams, true);
 }
 
 describe("/acp command", () => {
@@ -769,6 +788,54 @@ describe("/acp command", () => {
     expect(result?.reply?.text).toContain("acpx session id: acpx-sid-1");
     expect(result?.reply?.text).toContain("capabilities:");
     expect(hoisted.getStatusMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("blocks mutating /acp actions for internal operator.write clients", async () => {
+    const result = await runInternalAcpCommand({
+      commandBody: "/acp set-mode plan",
+      scopes: ["operator.write"],
+    });
+
+    expect(result?.shouldContinue).toBe(false);
+    expect(result?.reply?.text).toContain("requires operator.admin");
+    expect(hoisted.setModeMock).not.toHaveBeenCalled();
+  });
+
+  it("blocks /acp status for internal operator.write clients", async () => {
+    const result = await runInternalAcpCommand({
+      commandBody: "/acp status",
+      scopes: ["operator.write"],
+    });
+
+    expect(result?.shouldContinue).toBe(false);
+    expect(result?.reply?.text).toContain("requires operator.admin");
+    expect(hoisted.getStatusMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps read-only /acp actions available to internal operator.write clients", async () => {
+    const result = await runInternalAcpCommand({
+      commandBody: "/acp sessions",
+      scopes: ["operator.write"],
+    });
+
+    expect(result?.shouldContinue).toBe(false);
+    expect(result?.reply?.text).toContain("ACP sessions");
+  });
+
+  it("allows mutating /acp actions for internal operator.admin clients", async () => {
+    hoisted.readAcpSessionEntryMock.mockReturnValue(createAcpSessionEntry());
+
+    const result = await runInternalAcpCommand({
+      commandBody: "/acp set-mode plan",
+      scopes: ["operator.admin"],
+    });
+
+    expect(hoisted.setModeMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: "plan",
+      }),
+    );
+    expect(result?.reply?.text).toContain("Updated ACP runtime mode");
   });
 
   it("updates ACP runtime mode via /acp set-mode", async () => {
