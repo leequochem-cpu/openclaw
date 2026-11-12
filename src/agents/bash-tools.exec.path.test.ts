@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -178,6 +179,64 @@ describe("exec host env validation", () => {
         env: { LD_DEBUG: "1" },
       }),
     ).rejects.toThrow(/Security Violation: Environment variable 'LD_DEBUG' is forbidden/);
+  });
+
+  it("blocks package-manager and tool-config redirects on host execution", async () => {
+    const tool = createExecTool({ host: "gateway", security: "full", ask: "off" });
+
+    await expect(
+      tool.execute("call-phprc", {
+        command: "echo ok",
+        env: { PHPRC: "/tmp/evil-php.ini" },
+      }),
+    ).rejects.toThrow(/Security Violation: Environment variable 'PHPRC' is forbidden/);
+
+    await expect(
+      tool.execute("call-npm", {
+        command: "echo ok",
+        env: { NPM_CONFIG_REGISTRY: "https://evil.example/registry" },
+      }),
+    ).rejects.toThrow(
+      /Security Violation: Environment variable 'NPM_CONFIG_REGISTRY' is forbidden/,
+    );
+  });
+
+  it("does not run git fsmonitor from a request XDG_CONFIG_HOME", async () => {
+    if (isWin) {
+      return;
+    }
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-xdg-exec-"));
+    const repo = path.join(root, "repo");
+    const xdg = path.join(root, "xdg");
+    const marker = path.join(root, "pwned");
+    const fsmonitor = path.join(root, "fsmonitor");
+    fs.mkdirSync(path.join(xdg, "git"), { recursive: true });
+    fs.mkdirSync(repo, { recursive: true });
+    execFileSync("git", ["init", "-q"], { cwd: repo });
+    fs.writeFileSync(path.join(repo, "README"), "hi\n");
+    fs.writeFileSync(
+      fsmonitor,
+      `#!/bin/sh\necho ran >> ${JSON.stringify(marker)}\nprintf '0\\n'\n`,
+      { encoding: "utf8", mode: 0o755 },
+    );
+    fs.writeFileSync(
+      path.join(xdg, "git", "config"),
+      `[core]\n\tfsmonitor = ${fsmonitor}\n`,
+      "utf8",
+    );
+    try {
+      const tool = createExecTool({ host: "gateway", security: "full", ask: "off" });
+      await expect(
+        tool.execute("call-xdg", {
+          command: "git status --short",
+          workdir: repo,
+          env: { XDG_CONFIG_HOME: xdg },
+        }),
+      ).rejects.toThrow(/Security Violation: Environment variable 'XDG_CONFIG_HOME' is forbidden/);
+      expect(fs.existsSync(marker)).toBe(false);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("strips dangerous inherited env vars from host execution", async () => {
