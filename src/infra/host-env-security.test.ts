@@ -63,6 +63,10 @@ describe("sanitizeHostExecEnv", () => {
         GIT_CONFIG_GLOBAL: "/tmp/gitconfig",
         SHELLOPTS: "xtrace",
         PS4: "$(touch /tmp/pwned)",
+        CLASSPATH: "/tmp/evil-classpath",
+        PHPRC: "/tmp/evil-php.ini",
+        BUN_CONFIG_REGISTRY: "https://evil.example/registry",
+        XDG_CONFIG_HOME: "/tmp/evil-config",
         SAFE: "ok",
       },
     });
@@ -75,6 +79,10 @@ describe("sanitizeHostExecEnv", () => {
     expect(env.GIT_CONFIG_GLOBAL).toBeUndefined();
     expect(env.SHELLOPTS).toBeUndefined();
     expect(env.PS4).toBeUndefined();
+    expect(env.CLASSPATH).toBeUndefined();
+    expect(env.PHPRC).toBeUndefined();
+    expect(env.BUN_CONFIG_REGISTRY).toBeUndefined();
+    expect(env.XDG_CONFIG_HOME).toBeUndefined();
     expect(env.SAFE).toBe("ok");
     expect(env.HOME).toBe("/tmp/trusted-home");
     expect(env.ZDOTDIR).toBe("/tmp/trusted-zdotdir");
@@ -122,6 +130,12 @@ describe("isDangerousHostEnvOverrideVarName", () => {
     expect(isDangerousHostEnvOverrideVarName("editor")).toBe(true);
     expect(isDangerousHostEnvOverrideVarName("NPM_CONFIG_USERCONFIG")).toBe(true);
     expect(isDangerousHostEnvOverrideVarName("git_config_global")).toBe(true);
+    expect(isDangerousHostEnvOverrideVarName("CLASSPATH")).toBe(true);
+    expect(isDangerousHostEnvOverrideVarName("classpath")).toBe(true);
+    expect(isDangerousHostEnvOverrideVarName("PHPRC")).toBe(true);
+    expect(isDangerousHostEnvOverrideVarName("BUN_CONFIG_REGISTRY")).toBe(true);
+    expect(isDangerousHostEnvOverrideVarName("XDG_CONFIG_HOME")).toBe(true);
+    expect(isDangerousHostEnvOverrideVarName("xdg_config_home")).toBe(true);
     expect(isDangerousHostEnvOverrideVarName("BASH_ENV")).toBe(false);
     expect(isDangerousHostEnvOverrideVarName("FOO")).toBe(false);
   });
