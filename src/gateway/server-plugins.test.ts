@@ -1,7 +1,9 @@
+import type { IncomingMessage, ServerResponse } from "node:http";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { PluginRegistry } from "../plugins/registry.js";
 import type { PluginRuntime } from "../plugins/runtime/types.js";
 import type { PluginDiagnostic } from "../plugins/types.js";
+import { authorizeOperatorScopesForMethod } from "./method-scopes.js";
 import type { GatewayRequestContext, GatewayRequestOptions } from "./server-methods/types.js";
 
 const loadOpenClawPlugins = vi.hoisted(() => vi.fn());
@@ -44,6 +46,25 @@ function createTestContext(label: string): GatewayRequestContext {
 function getLastDispatchedContext(): GatewayRequestContext | undefined {
   const call = handleGatewayRequest.mock.calls.at(-1)?.[0];
   return call?.context;
+}
+
+function getLastDispatchedClientScopes(): string[] {
+  const call = handleGatewayRequest.mock.calls.at(-1)?.[0];
+  const scopes = call?.client?.connect?.scopes;
+  return Array.isArray(scopes) ? scopes : [];
+}
+
+function enforceDispatchedScope(opts: HandleGatewayRequestOptions): void {
+  const scopes = Array.isArray(opts.client?.connect?.scopes) ? opts.client.connect.scopes : [];
+  const auth = authorizeOperatorScopesForMethod(opts.req.method, scopes);
+  if (!auth.allowed) {
+    opts.respond(false, undefined, {
+      code: "INVALID_REQUEST",
+      message: `missing scope: ${auth.missingScope}`,
+    });
+    return;
+  }
+  opts.respond(true, opts.req.method === "agent" ? { runId: "run-1" } : {});
 }
 
 async function importServerPluginsModule(): Promise<ServerPluginsModule> {
@@ -208,5 +229,93 @@ describe("loadGatewayPlugins", () => {
       | (GatewayRequestContext & { marker: string })
       | undefined;
     expect(dispatched?.marker).toBe("after-mutation");
+  });
+
+  test("keeps a write-scoped caller instead of minting operator.admin", async () => {
+    const { withPluginRuntimeGatewayRequestScope } =
+      await import("../plugins/runtime/gateway-request-scope.js");
+    const serverPlugins = await importServerPluginsModule();
+    const runtime = createSubagentRuntime(serverPlugins);
+    serverPlugins.setFallbackGatewayContext(createTestContext("fallback-admin"));
+    handleGatewayRequest.mockImplementationOnce(async (opts: HandleGatewayRequestOptions) => {
+      enforceDispatchedScope(opts);
+    });
+
+    const client = {
+      connect: {
+        role: "operator",
+        scopes: ["operator.write"],
+      },
+    } as GatewayRequestOptions["client"];
+
+    await expect(
+      withPluginRuntimeGatewayRequestScope(
+        {
+          context: createTestContext("write-caller"),
+          client,
+          isWebchatConnect: () => false,
+        },
+        () => runtime.deleteSession({ sessionKey: "agent:main:main", deleteTranscript: true }),
+      ),
+    ).rejects.toThrow("missing scope: operator.admin");
+
+    expect(getLastDispatchedClientScopes()).toEqual(["operator.write"]);
+    expect(
+      authorizeOperatorScopesForMethod("sessions.delete", getLastDispatchedClientScopes()).allowed,
+    ).toBe(false);
+  });
+
+  test("plugin-auth HTTP routes cannot delete sessions through subagent dispatch", async () => {
+    const { createGatewayPluginRequestHandler } = await import("./server/plugins-http.js");
+    const serverPlugins = await importServerPluginsModule();
+    const runtime = createSubagentRuntime(serverPlugins);
+    serverPlugins.setFallbackGatewayContext(createTestContext("plugin-http"));
+    handleGatewayRequest.mockImplementationOnce(async (opts: HandleGatewayRequestOptions) => {
+      enforceDispatchedScope(opts);
+    });
+
+    let deleteError: unknown;
+    const handler = createGatewayPluginRequestHandler({
+      registry: {
+        ...createRegistry([]),
+        httpRoutes: [
+          {
+            pluginId: "task-hook",
+            path: "/hooks/task",
+            auth: "plugin",
+            match: "exact",
+            source: "task-hook",
+            handler: async () => {
+              try {
+                await runtime.deleteSession({
+                  sessionKey: "agent:main:main",
+                  deleteTranscript: true,
+                });
+              } catch (err) {
+                deleteError = err;
+              }
+              return true;
+            },
+          },
+        ],
+      },
+      log: { warn: vi.fn() } as unknown as Parameters<
+        typeof createGatewayPluginRequestHandler
+      >[0]["log"],
+    });
+
+    const res = {
+      headersSent: false,
+      statusCode: 200,
+      setHeader() {},
+      end() {},
+    } as unknown as ServerResponse;
+    const handled = await handler({ url: "/hooks/task" } as IncomingMessage, res);
+
+    expect(handled).toBe(true);
+    expect(deleteError).toBeInstanceOf(Error);
+    expect((deleteError as Error).message).toContain("missing scope: operator.admin");
+    expect(getLastDispatchedClientScopes()).toEqual(["operator.write"]);
+    expect(handleGatewayRequest.mock.calls.at(-1)?.[0]?.req.method).toBe("sessions.delete");
   });
 });

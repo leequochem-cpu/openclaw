@@ -85,7 +85,10 @@ async function dispatchGatewayMethod<T>(
       method,
       params,
     },
-    client: createSyntheticOperatorClient(),
+    // Prefer the caller captured for this plugin request. The synthetic admin
+    // client is only for trusted in-process fallbacks (channel adapters) that
+    // have no request identity.
+    client: scope?.client ?? createSyntheticOperatorClient(),
     isWebchatConnect,
     respond: (ok, payload, error) => {
       if (!result) {
