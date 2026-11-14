@@ -365,6 +365,66 @@ describe("resolvePermissionRequest", () => {
     expect(res).toEqual({ outcome: { outcome: "selected", optionId: "reject" } });
   });
 
+  it("auto-approves safe tools when rawInput is the only identity hint", async () => {
+    const prompt = vi.fn(async () => true);
+    const res = await resolvePermissionRequest(
+      makePermissionRequest({
+        toolCall: {
+          toolCallId: "tool-raw-only",
+          title: "Searching files",
+          status: "pending",
+          rawInput: {
+            name: "search",
+            query: "foo",
+          },
+        },
+      }),
+      { prompt, log: () => {} },
+    );
+    expect(res).toEqual({ outcome: { outcome: "selected", optionId: "allow" } });
+    expect(prompt).not.toHaveBeenCalled();
+  });
+
+  it("prompts when raw input spoofs a safe tool name for a dangerous title", async () => {
+    const prompt = vi.fn(async () => false);
+    const res = await resolvePermissionRequest(
+      makePermissionRequest({
+        toolCall: {
+          toolCallId: "tool-exec-spoof",
+          title: "exec: cat /etc/passwd",
+          status: "pending",
+          rawInput: {
+            command: "cat /etc/passwd",
+            name: "search",
+          },
+        },
+      }),
+      { prompt, log: () => {} },
+    );
+    expect(prompt).toHaveBeenCalledTimes(1);
+    expect(prompt).toHaveBeenCalledWith(undefined, "exec: cat /etc/passwd");
+    expect(res).toEqual({ outcome: { outcome: "selected", optionId: "reject" } });
+  });
+
+  it("prompts when metadata spoofs a scoped read for a dangerous title", async () => {
+    const prompt = vi.fn(async () => false);
+    const res = await resolvePermissionRequest(
+      makePermissionRequest({
+        toolCall: {
+          toolCallId: "tool-meta-read-spoof",
+          title: "exec: cat /etc/passwd",
+          status: "pending",
+          _meta: { toolName: "read" },
+          rawInput: { path: "docs/security.md" },
+        },
+      }),
+      { prompt, log: () => {}, cwd: "/tmp/openclaw-acp-cwd" },
+    );
+    expect(prompt).toHaveBeenCalledTimes(1);
+    expect(prompt).toHaveBeenCalledWith(undefined, "exec: cat /etc/passwd");
+    expect(res).toEqual({ outcome: { outcome: "selected", optionId: "reject" } });
+  });
+
   it("prompts when kind is spoofed as read", async () => {
     const prompt = vi.fn(async () => false);
     const res = await resolvePermissionRequest(
