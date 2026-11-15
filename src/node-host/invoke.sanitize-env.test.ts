@@ -44,6 +44,26 @@ describe("node-host sanitizeEnv", () => {
     });
   });
 
+  it("keeps an inherited package index and drops a request override", () => {
+    withEnv(
+      {
+        PIP_INDEX_URL: "https://trusted.example/simple",
+        UV_DEFAULT_INDEX: "https://trusted.example/uv",
+      },
+      () => {
+        const env = sanitizeEnv({
+          PIP_INDEX_URL: "https://evil.example/simple",
+          UV_EXTRA_INDEX_URL: "https://evil.example/uv-extra",
+          FOO: "bar",
+        });
+        expect(env.PIP_INDEX_URL).toBe("https://trusted.example/simple");
+        expect(env.UV_DEFAULT_INDEX).toBe("https://trusted.example/uv");
+        expect(env.UV_EXTRA_INDEX_URL).toBeUndefined();
+        expect(env.FOO).toBe("bar");
+      },
+    );
+  });
+
   it("drops dangerous inherited env keys even without overrides", () => {
     withEnv({ PATH: "/usr/bin:/bin", BASH_ENV: "/tmp/pwn.sh" }, () => {
       const env = sanitizeEnv(undefined);

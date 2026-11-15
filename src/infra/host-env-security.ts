@@ -33,6 +33,20 @@ export const HOST_SHELL_WRAPPER_ALLOWED_OVERRIDE_ENV_KEY_VALUES: readonly string
   "NO_COLOR",
   "FORCE_COLOR",
 ]);
+// Request-scoped package-index overrides. These stay off the inherited-env denylist so an
+// operator-configured index still applies, but callers must not retarget pip or uv.
+export const HOST_PACKAGE_INDEX_OVERRIDE_ENV_KEY_VALUES: readonly string[] = Object.freeze([
+  "PIP_INDEX_URL",
+  "PIP_PYPI_URL",
+  "PIP_EXTRA_INDEX_URL",
+  "UV_INDEX",
+  "UV_INDEX_URL",
+  "UV_DEFAULT_INDEX",
+  "UV_EXTRA_INDEX_URL",
+]);
+const HOST_PACKAGE_INDEX_OVERRIDE_ENV_KEYS = new Set<string>(
+  HOST_PACKAGE_INDEX_OVERRIDE_ENV_KEY_VALUES,
+);
 export const HOST_DANGEROUS_ENV_KEYS = new Set<string>(HOST_DANGEROUS_ENV_KEY_VALUES);
 export const HOST_DANGEROUS_OVERRIDE_ENV_KEYS = new Set<string>(
   HOST_DANGEROUS_OVERRIDE_ENV_KEY_VALUES,
@@ -77,6 +91,14 @@ export function isDangerousHostEnvOverrideVarName(rawKey: string): boolean {
     return true;
   }
   return HOST_DANGEROUS_OVERRIDE_ENV_PREFIXES.some((prefix) => upper.startsWith(prefix));
+}
+
+export function isPackageIndexHostEnvOverrideVarName(rawKey: string): boolean {
+  const key = normalizeEnvVarKey(rawKey);
+  if (!key) {
+    return false;
+  }
+  return HOST_PACKAGE_INDEX_OVERRIDE_ENV_KEYS.has(key.toUpperCase());
 }
 
 export function sanitizeHostExecEnv(params?: {
