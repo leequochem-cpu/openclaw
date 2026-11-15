@@ -3,7 +3,10 @@ import type { AgentToolResult } from "@mariozechner/pi-agent-core";
 import { Type } from "@sinclair/typebox";
 import { type ExecHost } from "../infra/exec-approvals.js";
 import { requestHeartbeatNow } from "../infra/heartbeat-wake.js";
-import { isDangerousHostEnvVarName } from "../infra/host-env-security.js";
+import {
+  isDangerousHostEnvVarName,
+  isPackageIndexHostEnvOverrideVarName,
+} from "../infra/host-env-security.js";
 import { findPathKey, mergePathPrepend } from "../infra/path-prepend.js";
 import { enqueueSystemEvent } from "../infra/system-events.js";
 import { scopedHeartbeatWakeOptions } from "../routing/session-key.js";
@@ -58,8 +61,10 @@ export function validateHostEnv(env: Record<string, string>): void {
   for (const key of Object.keys(env)) {
     const upperKey = key.toUpperCase();
 
-    // 1. Block known dangerous variables (Fail Closed)
-    if (isDangerousHostEnvVarName(upperKey)) {
+    // 1. Block known dangerous variables (Fail Closed). Package-index overrides are
+    // request-only: pip and uv honor them ahead of the operator index, so a caller can
+    // redirect an approved install. Other override-only keys stay on the node sanitizer.
+    if (isDangerousHostEnvVarName(upperKey) || isPackageIndexHostEnvOverrideVarName(upperKey)) {
       throw new Error(
         `Security Violation: Environment variable '${key}' is forbidden during host execution.`,
       );

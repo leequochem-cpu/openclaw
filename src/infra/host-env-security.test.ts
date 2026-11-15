@@ -4,8 +4,10 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  HOST_PACKAGE_INDEX_OVERRIDE_ENV_KEY_VALUES,
   isDangerousHostEnvOverrideVarName,
   isDangerousHostEnvVarName,
+  isPackageIndexHostEnvOverrideVarName,
   normalizeEnvVarKey,
   sanitizeHostExecEnv,
   sanitizeSystemRunEnvOverrides,
@@ -61,6 +63,13 @@ describe("sanitizeHostExecEnv", () => {
         EDITOR: "/tmp/editor",
         NPM_CONFIG_USERCONFIG: "/tmp/npmrc",
         GIT_CONFIG_GLOBAL: "/tmp/gitconfig",
+        PIP_INDEX_URL: "https://evil.example/simple",
+        PIP_PYPI_URL: "https://evil.example/legacy",
+        PIP_EXTRA_INDEX_URL: "https://evil.example/extra",
+        UV_INDEX: "https://evil.example/uv",
+        UV_INDEX_URL: "https://evil.example/uv-url",
+        UV_DEFAULT_INDEX: "https://evil.example/uv-default",
+        UV_EXTRA_INDEX_URL: "https://evil.example/uv-extra",
         SHELLOPTS: "xtrace",
         PS4: "$(touch /tmp/pwned)",
         SAFE: "ok",
@@ -78,6 +87,30 @@ describe("sanitizeHostExecEnv", () => {
     expect(env.SAFE).toBe("ok");
     expect(env.HOME).toBe("/tmp/trusted-home");
     expect(env.ZDOTDIR).toBe("/tmp/trusted-zdotdir");
+    expect(env.PIP_INDEX_URL).toBeUndefined();
+    expect(env.PIP_PYPI_URL).toBeUndefined();
+    expect(env.PIP_EXTRA_INDEX_URL).toBeUndefined();
+    expect(env.UV_INDEX).toBeUndefined();
+    expect(env.UV_INDEX_URL).toBeUndefined();
+    expect(env.UV_DEFAULT_INDEX).toBeUndefined();
+    expect(env.UV_EXTRA_INDEX_URL).toBeUndefined();
+  });
+
+  it("keeps an inherited package index while dropping a request override", () => {
+    const env = sanitizeHostExecEnv({
+      baseEnv: {
+        PATH: "/usr/bin:/bin",
+        PIP_INDEX_URL: "https://trusted.example/simple",
+        UV_DEFAULT_INDEX: "https://trusted.example/uv",
+      },
+      overrides: {
+        pip_index_url: "https://evil.example/simple",
+        UV_DEFAULT_INDEX: "https://evil.example/uv",
+      },
+    });
+
+    expect(env.PIP_INDEX_URL).toBe("https://trusted.example/simple");
+    expect(env.UV_DEFAULT_INDEX).toBe("https://trusted.example/uv");
   });
 
   it("drops dangerous inherited shell trace keys", () => {
@@ -124,6 +157,17 @@ describe("isDangerousHostEnvOverrideVarName", () => {
     expect(isDangerousHostEnvOverrideVarName("git_config_global")).toBe(true);
     expect(isDangerousHostEnvOverrideVarName("BASH_ENV")).toBe(false);
     expect(isDangerousHostEnvOverrideVarName("FOO")).toBe(false);
+  });
+
+  it("matches Python package index overrides without treating them as inherited blocks", () => {
+    for (const key of HOST_PACKAGE_INDEX_OVERRIDE_ENV_KEY_VALUES) {
+      expect(isPackageIndexHostEnvOverrideVarName(key)).toBe(true);
+      expect(isPackageIndexHostEnvOverrideVarName(key.toLowerCase())).toBe(true);
+      expect(isDangerousHostEnvOverrideVarName(key)).toBe(true);
+      expect(isDangerousHostEnvVarName(key)).toBe(false);
+    }
+    expect(isPackageIndexHostEnvOverrideVarName("HOME")).toBe(false);
+    expect(isPackageIndexHostEnvOverrideVarName("PIP_INDEX")).toBe(false);
   });
 });
 

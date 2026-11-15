@@ -50,7 +50,14 @@ enum HostEnvSecurityPolicy {
         "OPENSSL_ENGINES",
         "PYTHONSTARTUP",
         "WGETRC",
-        "CURL_HOME"
+        "CURL_HOME",
+        "PIP_INDEX_URL",
+        "PIP_PYPI_URL",
+        "PIP_EXTRA_INDEX_URL",
+        "UV_INDEX",
+        "UV_INDEX_URL",
+        "UV_DEFAULT_INDEX",
+        "UV_EXTRA_INDEX_URL"
     ]
 
     static let blockedOverridePrefixes: [String] = [

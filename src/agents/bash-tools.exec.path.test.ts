@@ -180,6 +180,59 @@ describe("exec host env validation", () => {
     ).rejects.toThrow(/Security Violation: Environment variable 'LD_DEBUG' is forbidden/);
   });
 
+  it("rejects request-scoped Python package index overrides before host execution", async () => {
+    const tool = createExecTool({ host: "gateway", security: "full", ask: "off" });
+    const cases = [
+      ["PIP_INDEX_URL", "https://evil.example/simple"],
+      ["pip_pypi_url", "https://evil.example/legacy"],
+      ["PIP_EXTRA_INDEX_URL", "https://evil.example/extra"],
+      ["UV_INDEX", "https://evil.example/uv"],
+      ["UV_INDEX_URL", "https://evil.example/uv-url"],
+      ["UV_DEFAULT_INDEX", "https://evil.example/uv-default"],
+      ["UV_EXTRA_INDEX_URL", "https://evil.example/uv-extra"],
+    ] as const;
+
+    for (const [key, value] of cases) {
+      await expect(
+        tool.execute("call-package-index", {
+          command: "echo ok",
+          env: { [key]: value },
+        }),
+      ).rejects.toThrow(
+        new RegExp(`Security Violation: Environment variable '${key}' is forbidden`),
+      );
+    }
+  });
+
+  it("keeps an inherited package index on gateway host execution", async () => {
+    if (isWin) {
+      return;
+    }
+    const originalPip = process.env.PIP_INDEX_URL;
+    const originalUv = process.env.UV_DEFAULT_INDEX;
+    process.env.PIP_INDEX_URL = "https://trusted.example/simple";
+    process.env.UV_DEFAULT_INDEX = "https://trusted.example/uv";
+    try {
+      const tool = createExecTool({ host: "gateway", security: "full", ask: "off" });
+      const result = await tool.execute("call-inherited-index", {
+        command: 'printf \'%s|%s\' "${PIP_INDEX_URL:-}" "${UV_DEFAULT_INDEX:-}"',
+      });
+      const output = normalizeText(result.content.find((c) => c.type === "text")?.text);
+      expect(output).toBe("https://trusted.example/simple|https://trusted.example/uv");
+    } finally {
+      if (originalPip === undefined) {
+        delete process.env.PIP_INDEX_URL;
+      } else {
+        process.env.PIP_INDEX_URL = originalPip;
+      }
+      if (originalUv === undefined) {
+        delete process.env.UV_DEFAULT_INDEX;
+      } else {
+        process.env.UV_DEFAULT_INDEX = originalUv;
+      }
+    }
+  });
+
   it("strips dangerous inherited env vars from host execution", async () => {
     if (isWin) {
       return;
