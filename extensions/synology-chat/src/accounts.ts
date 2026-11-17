@@ -84,6 +84,10 @@ export function resolveAccount(cfg: any, accountId?: string | null): ResolvedSyn
     incomingUrl: accountOverride.incomingUrl ?? channelCfg.incomingUrl ?? envIncomingUrl,
     nasHost: accountOverride.nasHost ?? channelCfg.nasHost ?? envNasHost,
     webhookPath: accountOverride.webhookPath ?? channelCfg.webhookPath ?? "/webhook/synology",
+    dangerouslyAllowNameMatching:
+      accountOverride.dangerouslyAllowNameMatching ??
+      channelCfg.dangerouslyAllowNameMatching ??
+      false,
     dmPolicy: accountOverride.dmPolicy ?? channelCfg.dmPolicy ?? "allowlist",
     allowedUserIds: parseAllowedUserIds(
       accountOverride.allowedUserIds ?? channelCfg.allowedUserIds ?? envAllowedUserIds,

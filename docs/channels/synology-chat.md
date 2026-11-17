@@ -92,6 +92,8 @@ openclaw message send --channel synology-chat --target synology-chat:123456 --te
 
 Media sends are supported by URL-based file delivery.
 
+Replies stay bound to the numeric `user_id` from the outgoing webhook. That id is the same value checked by `allowedUserIds`. Synology nicknames and usernames can be changed, so OpenClaw does not use them to pick a reply recipient. Set `dangerouslyAllowNameMatching: true` only when a deployment must remap the webhook id through the Chat user list and accepts that a renamed user can receive another person's reply.
+
 ## Multi-account
 
 Multiple Synology Chat accounts are supported under `channels.synology-chat.accounts`.

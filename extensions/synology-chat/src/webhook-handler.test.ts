@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { resolveChatUserId } from "./client.js";
 import type { ResolvedSynologyChatAccount } from "./types.js";
 import {
   clearSynologyWebhookRateLimiterStateForTest,
@@ -23,6 +24,7 @@ function makeAccount(
     incomingUrl: "https://nas.example.com/incoming",
     nasHost: "nas.example.com",
     webhookPath: "/webhook/synology",
+    dangerouslyAllowNameMatching: false,
     dmPolicy: "open",
     allowedUserIds: [],
     rateLimitPerMinute: 30,
@@ -114,6 +116,8 @@ describe("createWebhookHandler", () => {
 
   beforeEach(() => {
     clearSynologyWebhookRateLimiterStateForTest();
+    vi.mocked(resolveChatUserId).mockReset();
+    vi.mocked(resolveChatUserId).mockResolvedValue(undefined);
     log = {
       info: vi.fn(),
       warn: vi.fn(),
@@ -425,6 +429,61 @@ describe("createWebhookHandler", () => {
       expect.objectContaining({
         body: expect.stringContaining("[FILTERED]"),
         commandAuthorized: true,
+      }),
+    );
+  });
+
+  it("keeps replies on the webhook user id when name matching is disabled", async () => {
+    vi.mocked(resolveChatUserId).mockResolvedValue(999);
+    const deliver = vi.fn().mockResolvedValue("private reply");
+    const handler = createWebhookHandler({
+      account: makeAccount({
+        accountId: "stable-id-" + Date.now(),
+        dangerouslyAllowNameMatching: false,
+      }),
+      deliver,
+      log,
+    });
+
+    const req = makeReq("POST", validBody);
+    const res = makeRes();
+    await handler(req, res);
+
+    expect(resolveChatUserId).not.toHaveBeenCalled();
+    expect(deliver).toHaveBeenCalledWith(
+      expect.objectContaining({
+        from: "123",
+        chatUserId: "123",
+      }),
+    );
+  });
+
+  it("retargets replies by mutable username only when name matching is explicitly enabled", async () => {
+    vi.mocked(resolveChatUserId).mockResolvedValue(999);
+    const deliver = vi.fn().mockResolvedValue("private reply");
+    const handler = createWebhookHandler({
+      account: makeAccount({
+        accountId: "name-match-" + Date.now(),
+        dangerouslyAllowNameMatching: true,
+      }),
+      deliver,
+      log,
+    });
+
+    const req = makeReq("POST", validBody);
+    const res = makeRes();
+    await handler(req, res);
+
+    expect(resolveChatUserId).toHaveBeenCalledWith(
+      "https://nas.example.com/incoming",
+      "testuser",
+      true,
+      log,
+    );
+    expect(deliver).toHaveBeenCalledWith(
+      expect.objectContaining({
+        from: "123",
+        chatUserId: "999",
       }),
     );
   });
