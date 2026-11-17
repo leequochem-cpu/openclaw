@@ -18,7 +18,13 @@ import type { ResolvedSynologyChatAccount } from "./types.js";
 import { createWebhookHandler } from "./webhook-handler.js";
 
 const CHANNEL_ID = "synology-chat";
-const SynologyChatConfigSchema = buildChannelConfigSchema(z.object({}).passthrough());
+const SynologyChatConfigSchema = buildChannelConfigSchema(
+  z
+    .object({
+      dangerouslyAllowNameMatching: z.boolean().optional(),
+    })
+    .passthrough(),
+);
 
 const activeRouteUnregisters = new Map<string, () => void>();
 
@@ -151,6 +157,11 @@ export function createSynologyChatPlugin() {
         if (account.allowInsecureSsl) {
           warnings.push(
             "- Synology Chat: SSL verification is disabled (allowInsecureSsl=true). Only use this for local NAS with self-signed certificates.",
+          );
+        }
+        if (account.dangerouslyAllowNameMatching) {
+          warnings.push(
+            "- Synology Chat: dangerouslyAllowNameMatching=true re-enables mutable username/nickname recipient matching for replies. Prefer stable numeric user IDs.",
           );
         }
         if (account.dmPolicy === "open") {

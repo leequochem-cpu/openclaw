@@ -9,6 +9,12 @@ export interface SynologyChatChannelConfig {
   incomingUrl?: string;
   nasHost?: string;
   webhookPath?: string;
+  /**
+   * When true, reply delivery may retarget the webhook username/nickname
+   * through the Chat user list. Usernames are mutable, so this can send a
+   * reply to a different person than the authorized webhook user_id.
+   */
+  dangerouslyAllowNameMatching?: boolean;
   dmPolicy?: "open" | "allowlist" | "disabled";
   allowedUserIds?: string | string[];
   rateLimitPerMinute?: number;
@@ -24,6 +30,7 @@ export interface SynologyChatAccountRaw {
   incomingUrl?: string;
   nasHost?: string;
   webhookPath?: string;
+  dangerouslyAllowNameMatching?: boolean;
   dmPolicy?: "open" | "allowlist" | "disabled";
   allowedUserIds?: string | string[];
   rateLimitPerMinute?: number;
@@ -39,6 +46,8 @@ export interface ResolvedSynologyChatAccount {
   incomingUrl: string;
   nasHost: string;
   webhookPath: string;
+  /** Defaults false. See SynologyChatChannelConfig.dangerouslyAllowNameMatching. */
+  dangerouslyAllowNameMatching: boolean;
   dmPolicy: "open" | "allowlist" | "disabled";
   allowedUserIds: string[];
   rateLimitPerMinute: number;

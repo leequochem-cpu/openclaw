@@ -66,6 +66,7 @@ describe("resolveAccount", () => {
     expect(account.accountId).toBe("default");
     expect(account.enabled).toBe(true);
     expect(account.webhookPath).toBe("/webhook/synology");
+    expect(account.dangerouslyAllowNameMatching).toBe(false);
     expect(account.dmPolicy).toBe("allowlist");
     expect(account.rateLimitPerMinute).toBe(30);
     expect(account.botName).toBe("OpenClaw");
@@ -136,6 +137,22 @@ describe("resolveAccount", () => {
     const cfg = { channels: { "synology-chat": {} } };
     const account = resolveAccount(cfg);
     expect(account.rateLimitPerMinute).toBe(0);
+  });
+
+  it("keeps name matching off unless an account explicitly enables it", () => {
+    const cfg = {
+      channels: {
+        "synology-chat": {
+          dangerouslyAllowNameMatching: true,
+          accounts: {
+            work: { dangerouslyAllowNameMatching: false },
+            alerts: {},
+          },
+        },
+      },
+    };
+    expect(resolveAccount(cfg, "work").dangerouslyAllowNameMatching).toBe(false);
+    expect(resolveAccount(cfg, "alerts").dangerouslyAllowNameMatching).toBe(true);
   });
 
   it("falls back to 30 for malformed SYNOLOGY_RATE_LIMIT values", () => {

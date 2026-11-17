@@ -333,27 +333,29 @@ export function createWebhookHandler(deps: WebhookHandlerDeps) {
     // ACK immediately so Synology Chat won't remain in "Processing..."
     respondNoContent(res);
 
-    // Default to webhook user_id; may be replaced with Chat API user_id below.
+    // Keep the reply on the webhook user_id that just passed authorization.
+    // Nickname/username lookup is mutable and can retarget a different Chat user.
     let replyUserId = payload.user_id;
 
     // Deliver to agent asynchronously (with 120s timeout to match nginx proxy_read_timeout)
     try {
-      // Resolve the Chat-internal user_id for sending replies.
-      // Synology Chat outgoing webhooks use a per-integration user_id that may
-      // differ from the global Chat API user_id required by method=chatbot.
-      // We resolve via the user_list API, matching by nickname/username.
-      const chatUserId = await resolveChatUserId(
-        account.incomingUrl,
-        payload.username,
-        account.allowInsecureSsl,
-        log,
-      );
-      if (chatUserId !== undefined) {
-        replyUserId = String(chatUserId);
-      } else {
-        log?.warn(
-          `Could not resolve Chat API user_id for "${payload.username}" — falling back to webhook user_id ${payload.user_id}. Reply delivery may fail.`,
+      if (account.dangerouslyAllowNameMatching) {
+        // Opt-in only: Synology outgoing webhooks sometimes use a per-integration
+        // user_id that differs from the Chat API user_id. Matching nickname/username
+        // can repair delivery, but a renamed user can also capture the reply.
+        const chatUserId = await resolveChatUserId(
+          account.incomingUrl,
+          payload.username,
+          account.allowInsecureSsl,
+          log,
         );
+        if (chatUserId !== undefined) {
+          replyUserId = String(chatUserId);
+        } else {
+          log?.warn(
+            `Could not resolve Chat API user_id for "${payload.username}" — falling back to webhook user_id ${payload.user_id}. Reply delivery may fail.`,
+          );
+        }
       }
 
       const sessionKey = `synology-chat-${payload.user_id}`;

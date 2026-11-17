@@ -37,6 +37,9 @@ vi.mock("./runtime.js", () => ({
 
 vi.mock("zod", () => ({
   z: {
+    boolean: vi.fn(() => ({
+      optional: vi.fn(() => ({ _type: "zod-boolean" })),
+    })),
     object: vi.fn(() => ({
       passthrough: vi.fn(() => ({ _type: "zod-schema" })),
     })),
@@ -106,6 +109,7 @@ describe("createSynologyChatPlugin", () => {
         incomingUrl: "u",
         nasHost: "h",
         webhookPath: "/w",
+        dangerouslyAllowNameMatching: false,
         dmPolicy: "allowlist" as const,
         allowedUserIds: ["user1"],
         rateLimitPerMinute: 30,
@@ -140,6 +144,7 @@ describe("createSynologyChatPlugin", () => {
         incomingUrl: "https://nas/incoming",
         nasHost: "h",
         webhookPath: "/w",
+        dangerouslyAllowNameMatching: false,
         dmPolicy: "allowlist" as const,
         allowedUserIds: [],
         rateLimitPerMinute: 30,
@@ -159,6 +164,7 @@ describe("createSynologyChatPlugin", () => {
         incomingUrl: "https://nas/incoming",
         nasHost: "h",
         webhookPath: "/w",
+        dangerouslyAllowNameMatching: false,
         dmPolicy: "allowlist" as const,
         allowedUserIds: [],
         rateLimitPerMinute: 30,
@@ -167,6 +173,26 @@ describe("createSynologyChatPlugin", () => {
       };
       const warnings = plugin.security.collectWarnings({ account });
       expect(warnings.some((w: string) => w.includes("SSL"))).toBe(true);
+    });
+
+    it("warns when mutable username reply matching is enabled", () => {
+      const plugin = createSynologyChatPlugin();
+      const account = {
+        accountId: "default",
+        enabled: true,
+        token: "t",
+        incomingUrl: "https://nas/incoming",
+        nasHost: "h",
+        webhookPath: "/w",
+        dangerouslyAllowNameMatching: true,
+        dmPolicy: "allowlist" as const,
+        allowedUserIds: ["user1"],
+        rateLimitPerMinute: 30,
+        botName: "Bot",
+        allowInsecureSsl: false,
+      };
+      const warnings = plugin.security.collectWarnings({ account });
+      expect(warnings.some((w: string) => w.includes("dangerouslyAllowNameMatching"))).toBe(true);
     });
 
     it("warns when dmPolicy is open", () => {
@@ -178,6 +204,7 @@ describe("createSynologyChatPlugin", () => {
         incomingUrl: "https://nas/incoming",
         nasHost: "h",
         webhookPath: "/w",
+        dangerouslyAllowNameMatching: false,
         dmPolicy: "open" as const,
         allowedUserIds: [],
         rateLimitPerMinute: 30,
@@ -197,6 +224,7 @@ describe("createSynologyChatPlugin", () => {
         incomingUrl: "https://nas/incoming",
         nasHost: "h",
         webhookPath: "/w",
+        dangerouslyAllowNameMatching: false,
         dmPolicy: "allowlist" as const,
         allowedUserIds: [],
         rateLimitPerMinute: 30,
@@ -216,6 +244,7 @@ describe("createSynologyChatPlugin", () => {
         incomingUrl: "https://nas/incoming",
         nasHost: "h",
         webhookPath: "/w",
+        dangerouslyAllowNameMatching: false,
         dmPolicy: "allowlist" as const,
         allowedUserIds: ["user1"],
         rateLimitPerMinute: 30,
