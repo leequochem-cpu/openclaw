@@ -74,22 +74,25 @@ function createHeaderOnlyWebhookRequest(params: {
   return req;
 }
 
-const baseAccount = (accountId: string) =>
+const baseAccount = (accountId: string, config: ResolvedGoogleChatAccount["config"] = {}) =>
   ({
     accountId,
     enabled: true,
     credentialSource: "none",
-    config: {},
+    config,
   }) as ResolvedGoogleChatAccount;
 
-function registerTwoTargets() {
+function registerTwoTargets(configs?: {
+  A?: ResolvedGoogleChatAccount["config"];
+  B?: ResolvedGoogleChatAccount["config"];
+}) {
   const sinkA = vi.fn();
   const sinkB = vi.fn();
   const core = {} as PluginRuntime;
   const config = {} as OpenClawConfig;
 
   const unregisterA = registerGoogleChatWebhookTarget({
-    account: baseAccount("A"),
+    account: baseAccount("A", configs?.A),
     config,
     runtime: {},
     core,
@@ -98,7 +101,7 @@ function registerTwoTargets() {
     mediaMaxMb: 5,
   });
   const unregisterB = registerGoogleChatWebhookTarget({
-    account: baseAccount("B"),
+    account: baseAccount("B", configs?.B),
     config,
     runtime: {},
     core,
@@ -188,7 +191,10 @@ describe("Google Chat webhook routing", () => {
       .mockResolvedValueOnce({ ok: false, reason: "invalid" })
       .mockResolvedValueOnce({ ok: true });
 
-    const { sinkA, sinkB, unregister } = registerTwoTargets();
+    const { sinkA, sinkB, unregister } = registerTwoTargets({
+      B: { appPrincipal: "principal-header" },
+    });
+    vi.mocked(verifyGoogleChatRequest).mockClear();
 
     try {
       const res = createMockServerResponse();
@@ -204,6 +210,12 @@ describe("Google Chat webhook routing", () => {
       expect(res.statusCode).toBe(200);
       expect(sinkA).not.toHaveBeenCalled();
       expect(sinkB).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(verifyGoogleChatRequest).mock.calls[1]?.[0]).toEqual(
+        expect.objectContaining({
+          bearer: "test-token",
+          expectedAddOnPrincipal: "principal-header",
+        }),
+      );
     } finally {
       unregister();
     }
@@ -233,7 +245,11 @@ describe("Google Chat webhook routing", () => {
     vi.mocked(verifyGoogleChatRequest)
       .mockResolvedValueOnce({ ok: false, reason: "invalid" })
       .mockResolvedValueOnce({ ok: true });
-    const { sinkA, sinkB, unregister } = registerTwoTargets();
+    const { sinkA, sinkB, unregister } = registerTwoTargets({
+      A: { appPrincipal: "other-principal" },
+      B: { appPrincipal: "principal-1" },
+    });
+    vi.mocked(verifyGoogleChatRequest).mockClear();
 
     try {
       const res = createMockServerResponse();
@@ -259,6 +275,18 @@ describe("Google Chat webhook routing", () => {
       expect(res.statusCode).toBe(200);
       expect(sinkA).not.toHaveBeenCalled();
       expect(sinkB).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(verifyGoogleChatRequest).mock.calls[0]?.[0]).toEqual(
+        expect.objectContaining({
+          bearer: "addon-token",
+          expectedAddOnPrincipal: "other-principal",
+        }),
+      );
+      expect(vi.mocked(verifyGoogleChatRequest).mock.calls[1]?.[0]).toEqual(
+        expect.objectContaining({
+          bearer: "addon-token",
+          expectedAddOnPrincipal: "principal-1",
+        }),
+      );
     } finally {
       unregister();
     }

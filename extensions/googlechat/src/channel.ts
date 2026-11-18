@@ -163,6 +163,7 @@ export const googlechatPlugin: ChannelPlugin<ResolvedGoogleChatAccount> = {
           "serviceAccountFile",
           "audienceType",
           "audience",
+          "appPrincipal",
           "webhookPath",
           "webhookUrl",
           "botUser",
