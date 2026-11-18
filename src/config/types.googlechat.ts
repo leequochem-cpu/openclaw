@@ -74,6 +74,11 @@ export type GoogleChatAccountConfig = {
   audienceType?: "app-url" | "project-number";
   /** Audience value (app URL or project number). */
   audience?: string;
+  /**
+   * Exact Workspace Add-on token subject (`sub`) accepted for app-url delivery.
+   * Chat issuer tokens do not use this. Unset rejects add-on tokens.
+   */
+  appPrincipal?: string;
   /** Google Chat webhook path (default: /googlechat). */
   webhookPath?: string;
   /** Google Chat webhook URL (used to derive the path). */

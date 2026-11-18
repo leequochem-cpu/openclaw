@@ -144,6 +144,7 @@ Configure your tunnel's ingress rules to only route the webhook path:
 2. OpenClaw verifies the token against the configured `audienceType` + `audience`:
    - `audienceType: "app-url"` → audience is your HTTPS webhook URL.
    - `audienceType: "project-number"` → audience is the Cloud project number.
+   - Workspace Add-on tokens are accepted only when `channels.googlechat.appPrincipal` equals that token's `sub` claim. Tokens from `chat@system.gserviceaccount.com` do not use `appPrincipal`. Leave it unset to reject add-on tokens.
 3. Messages are routed by space:
    - DMs use session key `agent:<agentId>:googlechat:dm:<spaceId>`.
    - Spaces use session key `agent:<agentId>:googlechat:group:<spaceId>`.
@@ -171,6 +172,7 @@ Use these identifiers for delivery and allowlists:
       // or serviceAccountRef: { source: "file", provider: "filemain", id: "/channels/googlechat/serviceAccount" }
       audienceType: "app-url",
       audience: "https://gateway.example.com/googlechat",
+      appPrincipal: "addon-subject", // required for Workspace Add-on tokens; match the token sub claim
       webhookPath: "/googlechat",
       botUser: "users/1234567890", // optional; helps mention detection
       dm: {
@@ -200,6 +202,7 @@ Notes:
 - `serviceAccountRef` is also supported (env/file SecretRef), including per-account refs under `channels.googlechat.accounts.<id>.serviceAccountRef`.
 - Default webhook path is `/googlechat` if `webhookPath` isn’t set.
 - `dangerouslyAllowNameMatching` re-enables mutable email principal matching for allowlists (break-glass compatibility mode).
+- `appPrincipal` binds Workspace Add-on webhook tokens to one token subject. Chat app issuer tokens keep working without it.
 - Reactions are available via the `reactions` tool and `channels action` when `actions.reactions` is enabled.
 - `typingIndicator` supports `none`, `message` (default), and `reaction` (reaction requires user OAuth).
 - Attachments are downloaded through the Chat API and stored in the media pipeline (size capped by `mediaMaxMb`).
