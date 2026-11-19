@@ -1,3 +1,7 @@
+import {
+  isDiscordExecApprovalApprover,
+  isDiscordExecApprovalClientEnabled,
+} from "../../discord/exec-approval-access.js";
 import { callGateway } from "../../gateway/call.js";
 import { logVerbose } from "../../globals.js";
 import { GATEWAY_CLIENT_MODES, GATEWAY_CLIENT_NAMES } from "../../utils/message-channel.js";
@@ -81,6 +85,29 @@ export const handleApproveCommand: CommandHandler = async (params, allowTextComm
 
   if (!parsed.ok) {
     return { shouldContinue: false, reply: { text: parsed.error } };
+  }
+
+  // Button approvals already reject non-approvers. Text /approve uses the same
+  // list when the Discord exec-approval client is enabled, so a command-authorized
+  // sender cannot resolve a pending host exec outside that list.
+  if (params.command.channel === "discord") {
+    const discordApproverContext = {
+      cfg: params.cfg,
+      accountId: params.ctx.AccountId,
+      senderId: params.command.senderId,
+    };
+    if (
+      isDiscordExecApprovalClientEnabled(discordApproverContext) &&
+      !isDiscordExecApprovalApprover(discordApproverContext)
+    ) {
+      logVerbose(
+        `Ignoring /approve from non-approver Discord sender: ${params.command.senderId || "<unknown>"}`,
+      );
+      return {
+        shouldContinue: false,
+        reply: { text: "❌ You are not authorized to approve exec requests on Discord." },
+      };
+    }
   }
 
   const missingScope = requireGatewayClientScopeForInternalChannel(params, {
