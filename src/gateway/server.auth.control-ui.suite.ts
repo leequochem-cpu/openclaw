@@ -43,7 +43,7 @@ export function registerControlUiAndPairingSuite(): void {
       role: "operator",
       withUnpairedNodeDevice: false,
       expectedOk: true,
-      expectStatusChecks: true,
+      expectStatusChecks: false,
     },
     {
       name: "rejects trusted-proxy control ui node role without device identity",
@@ -222,6 +222,37 @@ export function registerControlUiAndPairingSuite(): void {
       });
     });
   }
+
+  test("clears self-declared scopes for trusted-proxy control ui without device identity", async () => {
+    await configureTrustedProxyControlUiAuth();
+    await withGatewayServer(async ({ port }) => {
+      const ws = await openWs(port, TRUSTED_PROXY_CONTROL_UI_HEADERS);
+      try {
+        const res = await connectReq(ws, {
+          skipDefaultAuth: true,
+          scopes: ["operator.admin"],
+          device: null,
+          client: { ...CONTROL_UI_CLIENT },
+        });
+        expect(res.ok).toBe(true);
+        expect((res.payload as { auth?: unknown } | undefined)?.auth).toBeUndefined();
+
+        const status = await rpcReq(ws, "status");
+        expect(status.ok).toBe(false);
+        expect(status.error?.message ?? "").toContain("missing scope");
+        const health = await rpcReq(ws, "health");
+        expect(health.ok).toBe(true);
+        const admin = await rpcReq(ws, "set-heartbeats", { enabled: false });
+        expect(admin.ok).toBe(false);
+        expect(admin.error?.message).toBe("missing scope: operator.admin");
+        const talk = await rpcReq(ws, "talk.config", { includeSecrets: true });
+        expect(talk.ok).toBe(false);
+        expect(talk.error?.message).toBe("missing scope: operator.read");
+      } finally {
+        ws.close();
+      }
+    });
+  });
 
   test("allows localhost control ui without device identity when insecure auth is enabled", async () => {
     testState.gatewayControlUi = { allowInsecureAuth: true };
