@@ -605,9 +605,6 @@ export function attachGatewayWsMessageHandler(params: {
           }
         };
         const handleMissingDeviceIdentity = (): boolean => {
-          if (!device) {
-            clearUnboundScopes();
-          }
           const trustedProxyAuthOk = isTrustedProxyControlUiOperatorAuth({
             isControlUi,
             role,
@@ -615,6 +612,17 @@ export function attachGatewayWsMessageHandler(params: {
             authOk,
             authMethod,
           });
+          if (!device) {
+            clearUnboundScopes();
+            // Trusted-proxy auth counts as shared auth, so the clear above
+            // keeps client-declared scopes. A Control UI session that skips
+            // device identity on that path has nothing to bind those scopes
+            // to, and must not keep operator.admin (or any other) self-claim.
+            if (trustedProxyAuthOk && scopes.length > 0) {
+              scopes = [];
+              connectParams.scopes = scopes;
+            }
+          }
           const decision = evaluateMissingDeviceIdentity({
             hasDeviceIdentity: Boolean(device),
             role,
