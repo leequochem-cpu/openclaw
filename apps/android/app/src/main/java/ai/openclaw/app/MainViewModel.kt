@@ -171,6 +171,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     runtime.handleCanvasA2UIActionFromWebView(payloadJson)
   }
 
+  fun isTrustedCanvasActionUrl(rawUrl: String?): Boolean {
+    return runtime.isTrustedCanvasActionUrl(rawUrl)
+  }
+
   fun requestCanvasRehydrate(source: String = "screen_tab") {
     runtime.requestCanvasRehydrate(source = source, force = true)
   }
