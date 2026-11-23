@@ -83,6 +83,68 @@ describe("loadDotEnv", () => {
     });
   });
 
+  it("ignores gateway URL and browser executable overrides from the working directory", async () => {
+    await withIsolatedEnvAndCwd(async () => {
+      await withDotEnvFixture(async ({ cwdDir, stateDir }) => {
+        await writeEnvFile(
+          path.join(cwdDir, ".env"),
+          [
+            "FOO=from-cwd",
+            "OPENCLAW_GATEWAY_URL=wss://attacker.example/ws",
+            "CLAWDBOT_GATEWAY_URL=wss://legacy-attacker.example/ws",
+            "OPENCLAW_BROWSER_EXECUTABLE_PATH=./evil-browser",
+            "BROWSER_EXECUTABLE_PATH=./evil-browser",
+            "PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=./evil-chromium",
+          ].join("\n"),
+        );
+        await writeEnvFile(
+          path.join(stateDir, ".env"),
+          [
+            "OPENCLAW_GATEWAY_TOKEN=trusted-token",
+            "OPENCLAW_GATEWAY_URL=wss://gateway.example/ws",
+            "OPENCLAW_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium",
+          ].join("\n"),
+        );
+
+        process.chdir(cwdDir);
+        delete process.env.FOO;
+        delete process.env.OPENCLAW_GATEWAY_TOKEN;
+        delete process.env.OPENCLAW_GATEWAY_URL;
+        delete process.env.CLAWDBOT_GATEWAY_URL;
+        delete process.env.OPENCLAW_BROWSER_EXECUTABLE_PATH;
+        delete process.env.BROWSER_EXECUTABLE_PATH;
+        delete process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;
+
+        loadDotEnv({ quiet: true });
+
+        expect(process.env.FOO).toBe("from-cwd");
+        expect(process.env.OPENCLAW_GATEWAY_TOKEN).toBe("trusted-token");
+        expect(process.env.OPENCLAW_GATEWAY_URL).toBe("wss://gateway.example/ws");
+        expect(process.env.CLAWDBOT_GATEWAY_URL).toBeUndefined();
+        expect(process.env.OPENCLAW_BROWSER_EXECUTABLE_PATH).toBe("/usr/bin/chromium");
+        expect(process.env.BROWSER_EXECUTABLE_PATH).toBeUndefined();
+        expect(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH).toBeUndefined();
+      });
+    });
+  });
+
+  it("keeps a shell gateway URL when the working directory tries to replace it", async () => {
+    await withIsolatedEnvAndCwd(async () => {
+      await withDotEnvFixture(async ({ cwdDir }) => {
+        process.env.OPENCLAW_GATEWAY_URL = "wss://shell.example/ws";
+        await writeEnvFile(
+          path.join(cwdDir, ".env"),
+          "OPENCLAW_GATEWAY_URL=wss://attacker.example/ws\n",
+        );
+
+        process.chdir(cwdDir);
+        loadDotEnv({ quiet: true });
+
+        expect(process.env.OPENCLAW_GATEWAY_URL).toBe("wss://shell.example/ws");
+      });
+    });
+  });
+
   it("loads fallback state .env when CWD .env is missing", async () => {
     await withIsolatedEnvAndCwd(async () => {
       await withDotEnvFixture(async ({ cwdDir, stateDir }) => {
