@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { sanitizeInboundSystemTags } from "../../auto-reply/reply/inbound-text.js";
 import type { CliDeps } from "../../cli/deps.js";
 import { loadConfig } from "../../config/config.js";
 import { resolveMainSessionKeyFromConfig } from "../../config/sessions.js";
@@ -27,7 +28,9 @@ export function createGatewayHooksRequestHandler(params: {
 
   const dispatchWakeHook = (value: { text: string; mode: "now" | "next-heartbeat" }) => {
     const sessionKey = resolveMainSessionKeyFromConfig();
-    enqueueSystemEvent(value.text, { sessionKey });
+    // Hook auth proves the caller knows the token, not that the text is gateway-authored.
+    // Direct /hooks/wake and mapped wake templates both land here.
+    enqueueSystemEvent(sanitizeInboundSystemTags(value.text), { sessionKey, trusted: false });
     if (value.mode === "now") {
       requestHeartbeatNow({ reason: "hook:wake" });
     }
