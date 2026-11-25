@@ -125,6 +125,22 @@ describe("cdp", () => {
     }
   });
 
+  it("blocks the browser debugging endpoint even when private network navigation is allowed", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    try {
+      await expect(
+        createTargetViaCdp({
+          cdpUrl: "http://127.0.0.1:9222",
+          url: "http://localhost:9222/json/version",
+          ssrfPolicy: { dangerouslyAllowPrivateNetwork: true },
+        }),
+      ).rejects.toThrow(/debugging endpoint/);
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
   it("allows private navigation targets when explicitly configured", async () => {
     const wsPort = await startWsServerWithMessages((msg, socket) => {
       if (msg.method !== "Target.createTarget") {

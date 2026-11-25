@@ -1,3 +1,4 @@
+import { assertBrowserControlSurfaceAllowed } from "../navigation-guard.js";
 import type { PwAiModule } from "../pw-ai-module.js";
 import { getPwAiModule as getPwAiModuleBase } from "../pw-ai-module.js";
 import type { BrowserRouteContext, ProfileContext } from "../server-context.js";
@@ -92,6 +93,11 @@ type RouteWithTabParams<T> = {
   res: BrowserResponse;
   ctx: BrowserRouteContext;
   targetId?: string;
+  /**
+   * Navigate and close must still run when the current tab is a file URL or
+   * the browser's debugging origin, so the operator can leave that page.
+   */
+  allowControlSurface?: boolean;
   run: (ctx: RouteTabContext) => Promise<T>;
 };
 
@@ -104,10 +110,14 @@ export async function withRouteTabContext<T>(
   }
   try {
     const tab = await profileCtx.ensureTabAvailable(params.targetId);
+    const cdpUrl = profileCtx.profile.cdpUrl;
+    if (!params.allowControlSurface) {
+      assertBrowserControlSurfaceAllowed({ url: tab.url, cdpUrl });
+    }
     return await params.run({
       profileCtx,
       tab,
-      cdpUrl: profileCtx.profile.cdpUrl,
+      cdpUrl,
     });
   } catch (err) {
     handleRouteError(params.ctx, params.res, err);
@@ -121,6 +131,7 @@ type RouteWithPwParams<T> = {
   ctx: BrowserRouteContext;
   targetId?: string;
   feature: string;
+  allowControlSurface?: boolean;
   run: (ctx: RouteTabPwContext) => Promise<T>;
 };
 
@@ -132,6 +143,7 @@ export async function withPlaywrightRouteContext<T>(
     res: params.res,
     ctx: params.ctx,
     targetId: params.targetId,
+    allowControlSurface: params.allowControlSurface,
     run: async ({ profileCtx, tab, cdpUrl }) => {
       const pw = await requirePwAi(params.res, params.feature);
       if (!pw) {

@@ -14,6 +14,7 @@ import { appendCdpPath, fetchJson, getHeadersWithAuth, withCdpSocket } from "./c
 import { normalizeCdpWsUrl } from "./cdp.js";
 import { getChromeWebSocketUrl } from "./chrome.js";
 import {
+  assertBrowserControlSurfaceAllowed,
   assertBrowserNavigationAllowed,
   assertBrowserNavigationResultAllowed,
   withBrowserNavigationPolicy,
@@ -763,6 +764,7 @@ export async function createPageViaPlaywright(opts: {
       url: targetUrl,
       ...navigationPolicy,
     });
+    assertBrowserControlSurfaceAllowed({ url: targetUrl, cdpUrl: opts.cdpUrl });
     await page.goto(targetUrl, { timeout: 30_000 }).catch(() => {
       // Navigation might fail for some URLs, but page is still created
     });
@@ -770,6 +772,12 @@ export async function createPageViaPlaywright(opts: {
       url: page.url(),
       ...navigationPolicy,
     });
+    try {
+      assertBrowserControlSurfaceAllowed({ url: page.url(), cdpUrl: opts.cdpUrl });
+    } catch (err) {
+      await page.close().catch(() => {});
+      throw err;
+    }
   }
 
   // Get the targetId for this page

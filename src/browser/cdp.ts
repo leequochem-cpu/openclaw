@@ -1,6 +1,10 @@
 import type { SsrFPolicy } from "../infra/net/ssrf.js";
 import { appendCdpPath, fetchJson, isLoopbackHost, withCdpSocket } from "./cdp.helpers.js";
-import { assertBrowserNavigationAllowed, withBrowserNavigationPolicy } from "./navigation-guard.js";
+import {
+  assertBrowserControlSurfaceAllowed,
+  assertBrowserNavigationAllowed,
+  withBrowserNavigationPolicy,
+} from "./navigation-guard.js";
 
 export { appendCdpPath, fetchJson, fetchOk, getHeadersWithAuth } from "./cdp.helpers.js";
 
@@ -93,6 +97,7 @@ export async function createTargetViaCdp(opts: {
     url: opts.url,
     ...withBrowserNavigationPolicy(opts.ssrfPolicy),
   });
+  assertBrowserControlSurfaceAllowed({ url: opts.url, cdpUrl: opts.cdpUrl });
 
   const version = await fetchJson<{ webSocketDebuggerUrl?: string }>(
     appendCdpPath(opts.cdpUrl, "/json/version"),

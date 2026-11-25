@@ -100,6 +100,7 @@ export function registerBrowserAgentSnapshotRoutes(
       ctx,
       targetId,
       feature: "navigate",
+      allowControlSurface: true,
       run: async ({ cdpUrl, tab, pw, profileCtx }) => {
         const result = await pw.navigateViaPlaywright({
           cdpUrl,

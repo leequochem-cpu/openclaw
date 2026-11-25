@@ -3,6 +3,7 @@ import { fetchJson, fetchOk } from "./cdp.helpers.js";
 import { appendCdpPath, createTargetViaCdp, normalizeCdpWsUrl } from "./cdp.js";
 import type { ResolvedBrowserProfile } from "./config.js";
 import {
+  assertBrowserControlSurfaceAllowed,
   assertBrowserNavigationAllowed,
   assertBrowserNavigationResultAllowed,
   withBrowserNavigationPolicy,
@@ -129,6 +130,7 @@ export function createProfileTabOps({
 
   const openTab = async (url: string): Promise<BrowserTab> => {
     const ssrfPolicyOpts = withBrowserNavigationPolicy(state().resolved.ssrfPolicy);
+    assertBrowserControlSurfaceAllowed({ url, cdpUrl: profile.cdpUrl });
 
     // For remote profiles, use Playwright's persistent connection to create tabs
     // This ensures the tab persists beyond a single request.
