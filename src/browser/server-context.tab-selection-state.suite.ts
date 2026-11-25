@@ -245,4 +245,20 @@ describe("browser server-context tab selection state", () => {
     );
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it("blocks the profile debugging endpoint before opening a tab", async () => {
+    const fetchMock = vi.fn(async () => {
+      throw new Error("unexpected fetch");
+    });
+
+    global.fetch = withFetchPreconnect(fetchMock);
+    const state = makeState("openclaw");
+    const ctx = createBrowserRouteContext({ getState: () => state });
+    const openclaw = ctx.forProfile("openclaw");
+
+    await expect(openclaw.openTab("http://localhost:18800/json/version")).rejects.toThrow(
+      /debugging endpoint/,
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });

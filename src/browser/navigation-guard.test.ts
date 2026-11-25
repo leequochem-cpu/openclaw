@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SsrFBlockedError, type LookupFn } from "../infra/net/ssrf.js";
 import {
+  assertBrowserControlSurfaceAllowed,
   assertBrowserNavigationAllowed,
   assertBrowserNavigationResultAllowed,
   InvalidBrowserNavigationUrlError,
@@ -146,5 +147,53 @@ describe("browser navigation guard", () => {
         url: "chrome-error://chromewebdata/",
       }),
     ).resolves.toBeUndefined();
+  });
+
+  it("blocks file URLs and the browser debugging origin", () => {
+    expect(() =>
+      assertBrowserControlSurfaceAllowed({
+        url: "file:///etc/passwd",
+        cdpUrl: "http://127.0.0.1:9222",
+      }),
+    ).toThrow(InvalidBrowserNavigationUrlError);
+    expect(() =>
+      assertBrowserControlSurfaceAllowed({
+        url: "http://127.0.0.1:9222/json/version",
+        cdpUrl: "http://127.0.0.1:9222",
+      }),
+    ).toThrow(/debugging endpoint/);
+    expect(() =>
+      assertBrowserControlSurfaceAllowed({
+        url: "http://localhost:9222/json/new?file:///etc/passwd",
+        cdpUrl: "http://127.0.0.1:9222",
+      }),
+    ).toThrow(/debugging endpoint/);
+    expect(() =>
+      assertBrowserControlSurfaceAllowed({
+        url: "http://2130706433:9222/json/version",
+        cdpUrl: "http://127.0.0.1:9222",
+      }),
+    ).toThrow(/debugging endpoint/);
+  });
+
+  it("allows other loopback services and public pages", () => {
+    expect(() =>
+      assertBrowserControlSurfaceAllowed({
+        url: "http://127.0.0.1:8080/secret",
+        cdpUrl: "http://127.0.0.1:9222",
+      }),
+    ).not.toThrow();
+    expect(() =>
+      assertBrowserControlSurfaceAllowed({
+        url: "https://example.com",
+        cdpUrl: "http://127.0.0.1:9222",
+      }),
+    ).not.toThrow();
+    expect(() =>
+      assertBrowserControlSurfaceAllowed({
+        url: "about:blank",
+        cdpUrl: "http://127.0.0.1:9222",
+      }),
+    ).not.toThrow();
   });
 });

@@ -1,6 +1,7 @@
 import type { SsrFPolicy } from "../infra/net/ssrf.js";
 import { type AriaSnapshotNode, formatAriaSnapshot, type RawAXNode } from "./cdp.js";
 import {
+  assertBrowserControlSurfaceAllowed,
   assertBrowserNavigationAllowed,
   assertBrowserNavigationResultAllowed,
   withBrowserNavigationPolicy,
@@ -188,6 +189,7 @@ export async function navigateViaPlaywright(opts: {
     url,
     ...withBrowserNavigationPolicy(opts.ssrfPolicy),
   });
+  assertBrowserControlSurfaceAllowed({ url, cdpUrl: opts.cdpUrl });
   const timeout = Math.max(1000, Math.min(120_000, opts.timeoutMs ?? 20_000));
   let page = await getPageForTargetId(opts);
   ensurePageState(page);
@@ -213,6 +215,12 @@ export async function navigateViaPlaywright(opts: {
     url: finalUrl,
     ...withBrowserNavigationPolicy(opts.ssrfPolicy),
   });
+  try {
+    assertBrowserControlSurfaceAllowed({ url: finalUrl, cdpUrl: opts.cdpUrl });
+  } catch (err) {
+    await page.close().catch(() => {});
+    throw err;
+  }
   return { url: finalUrl };
 }
 

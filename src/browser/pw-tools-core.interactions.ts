@@ -1,5 +1,6 @@
 import type { BrowserFormField } from "./client-actions-core.js";
 import { DEFAULT_FILL_FIELD_TYPE } from "./form-fields.js";
+import { assertBrowserControlSurfaceAllowed } from "./navigation-guard.js";
 import { DEFAULT_UPLOAD_DIR, resolveStrictExistingPathsWithinRoot } from "./paths.js";
 import {
   ensurePageState,
@@ -9,6 +10,35 @@ import {
   restoreRoleRefsForTarget,
 } from "./pw-session.js";
 import { normalizeTimeoutMs, requireRef, toAIFriendlyError } from "./pw-tools-core.shared.js";
+
+type ControlSurfacePage = {
+  url?: () => string;
+  close?: () => Promise<unknown>;
+};
+
+function assertPageNotOnControlSurface(page: ControlSurfacePage, cdpUrl: string): void {
+  if (typeof page.url !== "function") {
+    return;
+  }
+  assertBrowserControlSurfaceAllowed({ url: page.url(), cdpUrl });
+}
+
+async function quarantineControlSurfaceNavigation(
+  page: ControlSurfacePage,
+  cdpUrl: string,
+): Promise<void> {
+  if (typeof page.url !== "function") {
+    return;
+  }
+  try {
+    assertBrowserControlSurfaceAllowed({ url: page.url(), cdpUrl });
+  } catch (err) {
+    if (typeof page.close === "function") {
+      await page.close().catch(() => {});
+    }
+    throw err;
+  }
+}
 
 type TargetOpts = {
   cdpUrl: string;
@@ -66,6 +96,7 @@ export async function clickViaPlaywright(opts: {
   timeoutMs?: number;
 }): Promise<void> {
   const page = await getRestoredPageForTarget(opts);
+  assertPageNotOnControlSurface(page, opts.cdpUrl);
   const ref = requireRef(opts.ref);
   const locator = refLocator(page, ref);
   const timeout = resolveInteractionTimeoutMs(opts.timeoutMs);
@@ -84,8 +115,10 @@ export async function clickViaPlaywright(opts: {
       });
     }
   } catch (err) {
+    await quarantineControlSurfaceNavigation(page, opts.cdpUrl).catch(() => {});
     throw toAIFriendlyError(err, ref);
   }
+  await quarantineControlSurfaceNavigation(page, opts.cdpUrl);
 }
 
 export async function hoverViaPlaywright(opts: {
@@ -247,6 +280,7 @@ export async function evaluateViaPlaywright(opts: {
     throw new Error("function is required");
   }
   const page = await getRestoredPageForTarget(opts);
+  assertPageNotOnControlSurface(page, opts.cdpUrl);
   // Clamp evaluate timeout to prevent permanently blocking Playwright's command queue.
   // Without this, a long-running async evaluate blocks all subsequent page operations
   // because Playwright serializes CDP commands per page.
@@ -326,7 +360,9 @@ export async function evaluateViaPlaywright(opts: {
         fnBody: fnText,
         timeoutMs: evaluateTimeout,
       });
-      return await awaitEvalWithAbort(evalPromise, abortPromise);
+      const result = await awaitEvalWithAbort(evalPromise, abortPromise);
+      await quarantineControlSurfaceNavigation(page, opts.cdpUrl);
+      return result;
     }
 
     // eslint-disable-next-line @typescript-eslint/no-implied-eval -- required for browser-context eval
@@ -356,7 +392,9 @@ export async function evaluateViaPlaywright(opts: {
       fnBody: fnText,
       timeoutMs: evaluateTimeout,
     });
-    return await awaitEvalWithAbort(evalPromise, abortPromise);
+    const result = await awaitEvalWithAbort(evalPromise, abortPromise);
+    await quarantineControlSurfaceNavigation(page, opts.cdpUrl);
+    return result;
   } finally {
     if (signal && abortListener) {
       signal.removeEventListener("abort", abortListener);

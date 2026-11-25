@@ -28,6 +28,24 @@ describe("pw-tools-core.snapshot navigate guard", () => {
     expect(goto).not.toHaveBeenCalled();
   });
 
+  it("blocks the browser debugging origin before navigation", async () => {
+    const goto = vi.fn(async () => {});
+    setPwToolsCoreCurrentPage({
+      goto,
+      url: vi.fn(() => "https://example.com"),
+    });
+
+    await expect(
+      mod.navigateViaPlaywright({
+        cdpUrl: "http://127.0.0.1:18792",
+        url: "http://localhost:18792/json/version",
+        ssrfPolicy: { dangerouslyAllowPrivateNetwork: true },
+      }),
+    ).rejects.toThrow(/debugging endpoint/);
+
+    expect(goto).not.toHaveBeenCalled();
+  });
+
   it("navigates valid network URLs with clamped timeout", async () => {
     const goto = vi.fn(async () => {});
     setPwToolsCoreCurrentPage({

@@ -1,5 +1,6 @@
 import type { BrowserFormField } from "../client-actions-core.js";
 import { normalizeBrowserFormField } from "../form-fields.js";
+import { assertBrowserControlSurfaceAllowed } from "../navigation-guard.js";
 import type { BrowserRouteContext } from "../server-context.js";
 import { registerBrowserAgentActDownloadRoutes } from "./agent.act.download.js";
 import { registerBrowserAgentActHookRoutes } from "./agent.act.hooks.js";
@@ -40,7 +41,11 @@ export function registerBrowserAgentActRoutes(
       ctx,
       targetId,
       feature: `act:${kind}`,
+      allowControlSurface: true,
       run: async ({ cdpUrl, tab, pw }) => {
+        if (kind !== "close") {
+          assertBrowserControlSurfaceAllowed({ url: tab.url, cdpUrl });
+        }
         const evaluateEnabled = ctx.state().resolved.evaluateEnabled;
 
         switch (kind) {
