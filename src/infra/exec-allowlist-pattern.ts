@@ -1,8 +1,11 @@
 import fs from "node:fs";
+import path from "node:path";
 import { expandHomePrefix } from "./home-dir.js";
 
 const GLOB_REGEX_CACHE_LIMIT = 512;
 const globRegexCache = new Map<string, RegExp>();
+// A `.` or `..` path segment. Wildcards must not treat these as ordinary names.
+const DOT_PATH_SEGMENT = /(?:^|[/\\])\.{1,2}(?=$|[/\\])/;
 
 function normalizeMatchTarget(value: string): string {
   if (process.platform === "win32") {
@@ -22,6 +25,12 @@ function tryRealpath(value: string): string | null {
 
 function escapeRegExpLiteral(input: string): string {
   return input.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function normalizeDotPathSegments(value: string): string {
+  const normalized =
+    process.platform === "win32" ? path.win32.normalize(value) : path.posix.normalize(value);
+  return normalizeMatchTarget(normalized);
 }
 
 function compileGlobRegex(pattern: string): RegExp {
@@ -46,7 +55,8 @@ function compileGlobRegex(pattern: string): RegExp {
       continue;
     }
     if (ch === "?") {
-      regex += ".";
+      // `?` is one path character, not a separator, so it cannot cross directories.
+      regex += "[^/]";
       i += 1;
       continue;
     }
@@ -79,5 +89,11 @@ export function matchesExecAllowlistPattern(pattern: string, target: string): bo
   }
   normalizedPattern = normalizeMatchTarget(normalizedPattern);
   normalizedTarget = normalizeMatchTarget(normalizedTarget);
+  // Collapse `..` before wildcard matching. Otherwise `/allowed/**` matches
+  // `/allowed/../../usr/bin/bash` and allowlist mode auto-approves the escaped binary.
+  // Patterns stay raw: normalizing a glob would rewrite intentional `*/..` entries.
+  if (hasWildcard && DOT_PATH_SEGMENT.test(normalizedTarget)) {
+    normalizedTarget = normalizeDotPathSegments(normalizedTarget);
+  }
   return compileGlobRegex(normalizedPattern).test(normalizedTarget);
 }
