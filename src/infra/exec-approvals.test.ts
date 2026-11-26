@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { matchesExecAllowlistPattern } from "./exec-allowlist-pattern.js";
 import { makePathEnv, makeTempDir } from "./exec-approvals-test-helpers.js";
 import {
   analyzeArgvCommand,
@@ -80,6 +81,19 @@ describe("exec approvals allowlist matching", () => {
       const match = matchAllowlist(testCase.entries, baseResolution);
       expect(match?.pattern ?? null).toBe(testCase.expectedPattern);
     }
+  });
+
+  it("does not let wildcard allowlist patterns match paths that leave the directory", () => {
+    expect(matchesExecAllowlistPattern("/opt/allowed/**", "/opt/allowed/bin/tool")).toBe(true);
+    expect(matchesExecAllowlistPattern("/opt/allowed/**", "/opt/allowed/sub/../bin/tool")).toBe(
+      true,
+    );
+    expect(matchesExecAllowlistPattern("/opt/allowed/**", "/opt/allowed/../../usr/bin/bash")).toBe(
+      false,
+    );
+    expect(matchesExecAllowlistPattern("/opt/allowed/*", "/opt/allowed/..")).toBe(false);
+    expect(matchesExecAllowlistPattern("/usr/bin/pytho?", "/usr/bin/python")).toBe(true);
+    expect(matchesExecAllowlistPattern("/bin?true", "/bin/true")).toBe(false);
   });
 
   it("matches bare * wildcard pattern against any resolved path", () => {
@@ -627,6 +641,48 @@ describe("exec approvals shell allowlist (chained commands)", () => {
     });
     expect(result.analysisOk).toBe(false);
     expect(result.allowlistSatisfied).toBe(false);
+  });
+
+  it("does not auto-allow a wildcard directory when the executable path walks out with ..", () => {
+    const root = makeTempDir();
+    const allowed = path.join(root, "allowed");
+    const outside = path.join(root, "outside");
+    fs.mkdirSync(allowed);
+    fs.mkdirSync(outside);
+    const outsideBin = path.join(outside, "tool");
+    const insideBin = path.join(allowed, "tool");
+    fs.writeFileSync(outsideBin, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    fs.writeFileSync(insideBin, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    const traversal = `${allowed}/../outside/tool`;
+    const allowlist = [{ pattern: `${allowed}/**` }];
+    try {
+      const allowedResult = evaluateShellAllowlist({
+        command: insideBin,
+        allowlist,
+        safeBins: new Set(),
+        cwd: root,
+      });
+      expect(allowedResult.analysisOk).toBe(true);
+      expect(allowedResult.allowlistSatisfied).toBe(true);
+      const result = evaluateShellAllowlist({
+        command: traversal,
+        allowlist,
+        safeBins: new Set(),
+        cwd: root,
+      });
+      expect(result.analysisOk).toBe(true);
+      expect(result.allowlistSatisfied).toBe(false);
+      expect(
+        requiresExecApproval({
+          ask: "on-miss",
+          security: "allowlist",
+          analysisOk: result.analysisOk,
+          allowlistSatisfied: result.allowlistSatisfied,
+        }),
+      ).toBe(true);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("satisfies allowlist when bare * wildcard is present", () => {
