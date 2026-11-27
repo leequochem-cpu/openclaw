@@ -358,6 +358,25 @@ export async function registerSlackMonitorSlashCommands(params: {
         },
       );
 
+      if (isGroupDm) {
+        const senderName = ctx.allowNameMatching
+          ? ((await ctx.resolveUserName(command.user_id))?.name ?? command.user_name)
+          : undefined;
+        const groupDmAllowed = resolveSlackAllowListMatch({
+          allowList: effectiveAllowFromLower,
+          id: command.user_id,
+          name: senderName,
+          allowNameMatching: ctx.allowNameMatching,
+        }).allowed;
+        if (!groupDmAllowed) {
+          await respond({
+            text: "You are not authorized to use this command.",
+            response_type: "ephemeral",
+          });
+          return;
+        }
+      }
+
       // Privileged command surface: compute CommandAuthorized, don't assume true.
       // Keep this aligned with the Slack message path (message-handler/prepare.ts).
       let commandAuthorized = false;

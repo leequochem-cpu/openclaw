@@ -7,7 +7,11 @@ vi.mock("../../pairing/pairing-store.js", () => ({
   readChannelAllowFromStore: (...args: unknown[]) => readChannelAllowFromStoreMock(...args),
 }));
 
-import { clearSlackAllowFromCacheForTest, resolveSlackEffectiveAllowFrom } from "./auth.js";
+import {
+  authorizeSlackSystemEventSender,
+  clearSlackAllowFromCacheForTest,
+  resolveSlackEffectiveAllowFrom,
+} from "./auth.js";
 
 function makeSlackCtx(allowFrom: string[]): SlackMonitorContext {
   return {
@@ -58,6 +62,45 @@ describe("resolveSlackEffectiveAllowFrom", () => {
     expect(first.allowFrom).toEqual(["u1", "u2"]);
     expect(second.allowFrom).toEqual(["u1", "u2"]);
     expect(readChannelAllowFromStoreMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects group DM senders that are only present in the pairing store", async () => {
+    readChannelAllowFromStoreMock.mockResolvedValue(["U_GUEST"]);
+    const ctx = {
+      allowFrom: ["U_OWNER"],
+      accountId: "main",
+      dmPolicy: "pairing",
+      dmEnabled: true,
+      allowNameMatching: false,
+      resolveChannelName: async () => ({ name: "mpdm", type: "mpim" as const }),
+      resolveUserName: async () => ({ name: "Mallory" }),
+      isChannelAllowed: () => true,
+    } as unknown as SlackMonitorContext;
+
+    const denied = await authorizeSlackSystemEventSender({
+      ctx,
+      senderId: "U_GUEST",
+      channelId: "G456",
+      channelType: "mpim",
+    });
+    const allowed = await authorizeSlackSystemEventSender({
+      ctx,
+      senderId: "U_OWNER",
+      channelId: "G456",
+      channelType: "mpim",
+    });
+    const wildcard = await authorizeSlackSystemEventSender({
+      ctx: { ...ctx, allowFrom: ["*"] } as SlackMonitorContext,
+      senderId: "U_GUEST",
+      channelId: "G456",
+      channelType: "mpim",
+    });
+
+    expect(denied.allowed).toBe(false);
+    expect(denied.reason).toBe("sender-not-allowlisted");
+    expect(allowed.allowed).toBe(true);
+    expect(wildcard.allowed).toBe(true);
+    expect(readChannelAllowFromStoreMock).not.toHaveBeenCalled();
   });
 
   it("refreshes pairing-store allowFrom when cache TTL is zero", async () => {

@@ -10,6 +10,7 @@ export function createInboundSlackTestContext(params: {
   defaultRequireMention?: boolean;
   replyToMode?: "off" | "all" | "first";
   channelsConfig?: Record<string, { systemPrompt: string }>;
+  allowFrom?: string[];
 }) {
   return createSlackMonitorContext({
     cfg: params.cfg,
@@ -25,7 +26,7 @@ export function createInboundSlackTestContext(params: {
     mainKey: "main",
     dmEnabled: true,
     dmPolicy: "open",
-    allowFrom: [],
+    allowFrom: params.allowFrom ?? [],
     allowNameMatching: false,
     groupDmEnabled: true,
     groupDmChannels: [],

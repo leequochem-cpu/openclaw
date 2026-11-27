@@ -151,6 +151,7 @@ For actions/directory reads, user token can be preferred when configured. For wr
     - `dm.allowFrom` (legacy)
     - `dm.groupEnabled` (group DMs default false)
     - `dm.groupChannels` (optional MPIM allowlist)
+    - group DMs use `channels.slack.allowFrom` as the sender allowlist (pairing-store approvals do not apply; `"*"` allows every participant)
 
     Multi-account precedence:
 

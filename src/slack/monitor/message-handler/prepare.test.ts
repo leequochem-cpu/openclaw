@@ -198,6 +198,71 @@ describe("slack prepareSlackMessage inbound contract", () => {
     return slackCtx;
   }
 
+  it("drops group DM messages from senders outside allowFrom", async () => {
+    const slackCtx = createInboundSlackCtx({
+      cfg: {
+        channels: { slack: { enabled: true, allowFrom: ["U_OWNER"] } },
+      } as OpenClawConfig,
+      allowFrom: ["U_OWNER"],
+    });
+    slackCtx.resolveUserName = async () => ({ name: "Mallory" });
+
+    const prepared = await prepareMessageWith(
+      slackCtx,
+      defaultAccount,
+      createSlackMessage({
+        channel: "G456",
+        channel_type: "mpim",
+        user: "U_GUEST",
+        text: "hello from the group dm",
+      }),
+    );
+
+    expect(prepared).toBeNull();
+  });
+
+  it("admits group DM messages from allowFrom senders and from wildcard lists", async () => {
+    const ownerCtx = createInboundSlackCtx({
+      cfg: {
+        channels: { slack: { enabled: true, allowFrom: ["U_OWNER"] } },
+      } as OpenClawConfig,
+      allowFrom: ["U_OWNER"],
+    });
+    ownerCtx.resolveUserName = async () => ({ name: "Ada" });
+    const ownerMessage = await prepareMessageWith(
+      ownerCtx,
+      defaultAccount,
+      createSlackMessage({
+        channel: "G456",
+        channel_type: "mpim",
+        user: "U_OWNER",
+        text: "hello from the owner",
+      }),
+    );
+    expect(ownerMessage).toBeTruthy();
+    expect(ownerMessage!.ctxPayload.SenderId).toBe("U_OWNER");
+    expect(ownerMessage!.isRoomish).toBe(true);
+
+    const openCtx = createInboundSlackCtx({
+      cfg: {
+        channels: { slack: { enabled: true, allowFrom: ["*"] } },
+      } as OpenClawConfig,
+      allowFrom: ["*"],
+    });
+    openCtx.resolveUserName = async () => ({ name: "Mallory" });
+    const guestMessage = await prepareMessageWith(
+      openCtx,
+      defaultAccount,
+      createSlackMessage({
+        channel: "G456",
+        channel_type: "mpim",
+        user: "U_GUEST",
+        text: "hello from an open group dm",
+      }),
+    );
+    expect(guestMessage).toBeTruthy();
+  });
+
   it("produces a finalized MsgContext", async () => {
     const message: SlackMessageEvent = {
       channel: "D123",

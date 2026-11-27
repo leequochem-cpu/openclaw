@@ -212,6 +212,22 @@ async function authorizeSlackInboundMessage(params: {
     includePairingStore: isDirectMessage,
   });
 
+  if (conversation.isGroupDm) {
+    const senderName = ctx.allowNameMatching
+      ? (await ctx.resolveUserName(senderId).catch(() => ({}) as { name?: string })).name
+      : undefined;
+    const allowMatch = resolveSlackAllowListMatch({
+      allowList: allowFromLower,
+      id: senderId,
+      name: senderName,
+      allowNameMatching: ctx.allowNameMatching,
+    });
+    if (!allowMatch.allowed) {
+      logVerbose(`Blocked unauthorized slack sender ${senderId} (group dm allowFrom)`);
+      return null;
+    }
+  }
+
   if (isDirectMessage) {
     const directUserId = message.user;
     if (!directUserId) {
