@@ -948,6 +948,51 @@ describe("slack slash commands access groups", () => {
     expect(dispatchArg?.ctx?.CommandAuthorized).toBe(false);
   });
 
+  it("blocks group DM slash commands from senders outside allowFrom", async () => {
+    const harness = createPolicyHarness({
+      allowFrom: ["U_OWNER"],
+      useAccessGroups: false,
+      channelId: "G456",
+      channelName: "mpdm",
+      resolveChannelName: async () => ({ name: "mpdm", type: "mpim" }),
+    });
+    const { respond } = await registerAndRunPolicySlash({
+      harness,
+      command: {
+        user_id: "U_GUEST",
+        user_name: "Mallory",
+        channel_id: "G456",
+        channel_name: "mpdm",
+      },
+    });
+
+    expectUnauthorizedResponse(respond);
+  });
+
+  it("runs group DM slash commands for allowFrom senders", async () => {
+    const harness = createPolicyHarness({
+      allowFrom: ["U_OWNER"],
+      useAccessGroups: false,
+      channelId: "G456",
+      channelName: "mpdm",
+      resolveChannelName: async () => ({ name: "mpdm", type: "mpim" }),
+    });
+    const { respond } = await registerAndRunPolicySlash({
+      harness,
+      command: {
+        user_id: "U_OWNER",
+        user_name: "Ada",
+        channel_id: "G456",
+        channel_name: "mpdm",
+      },
+    });
+
+    expect(dispatchMock).toHaveBeenCalledTimes(1);
+    expect(respond).not.toHaveBeenCalledWith(
+      expect.objectContaining({ text: "You are not authorized to use this command." }),
+    );
+  });
+
   it("enforces access-group gating when lookup fails for private channels", async () => {
     const harness = createPolicyHarness({
       allowFrom: [],

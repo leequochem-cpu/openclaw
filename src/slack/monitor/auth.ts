@@ -234,6 +234,25 @@ export async function authorizeSlackSystemEventSender(params: {
         };
       }
     }
+  } else if (channelType === "mpim") {
+    // Group DMs are group-shaped, but the sender policy is the configured DM
+    // allowFrom list. Pairing-store approvals do not extend into an MPIM.
+    // An empty list fails closed (allowListMatches), unlike the DM helper.
+    const allowFromLower = await resolveAllowFromLower(false);
+    const senderAllowListed = allowListMatches({
+      allowList: allowFromLower,
+      id: senderId,
+      name: senderName,
+      allowNameMatching: params.ctx.allowNameMatching,
+    });
+    if (!senderAllowListed) {
+      return {
+        allowed: false,
+        reason: "sender-not-allowlisted",
+        channelType,
+        channelName,
+      };
+    }
   } else if (!channelId) {
     // No channel context. Apply allowFrom if configured so we fail closed
     // for privileged interactive events when owner allowlist is present.
