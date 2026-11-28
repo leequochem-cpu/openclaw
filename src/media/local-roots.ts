@@ -26,7 +26,8 @@ function buildMediaLocalRoots(
   return [
     preferredTmpDir,
     path.join(resolvedStateDir, "media"),
-    path.join(resolvedStateDir, "agents"),
+    // `agents/` holds auth-profiles.json and session transcripts. Reply MEDIA:
+    // tokens are loaded from these roots, so that tree must stay out.
     path.join(resolvedStateDir, "workspace"),
     path.join(resolvedStateDir, "sandboxes"),
   ];

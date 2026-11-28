@@ -473,6 +473,20 @@ describe("local media root guard", () => {
     );
   });
 
+  it("rejects agent state files such as auth profiles from the default media roots", async () => {
+    const stateDir = resolveStateDir();
+    const readFile = vi.fn(async () => Buffer.from('{"token":"secret"}'));
+    const authProfiles = path.join(stateDir, "agents", "main", "agent", "auth-profiles.json");
+
+    await expect(
+      loadWebMedia(authProfiles, {
+        maxBytes: 1024 * 1024,
+        readFile,
+      }),
+    ).rejects.toMatchObject({ code: "path-not-allowed" });
+    expect(readFile).not.toHaveBeenCalled();
+  });
+
   it("rejects default OpenClaw state per-agent workspace-* roots without explicit local roots", async () => {
     const stateDir = resolveStateDir();
     const readFile = vi.fn(async () => Buffer.from("generated-media"));
